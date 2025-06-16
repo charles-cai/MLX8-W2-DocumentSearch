@@ -1,0 +1,81 @@
+## DuckDB Installation
+
+https://duckdb.org/#quickinstall
+
+```shell
+curl https://install.duckdb.org | sh
+```
+
+## Tests Connecting to DuckDB and Querying Hugging Face Datasets
+
+DuckDB accessing Hugging Face Datasets: https://duckdb.org/2024/05/29/access-150k-plus-datasets-from-hugging-face-with-duckdb.html
+
+Hugging Face Documentation: https://huggingface.co/docs/hub/en/datasets-duckdb
+
+```sql
+SELECT * FROM 'hf://datasets/microsoft/ms_marco/v1.1/test-00000-of-00001.parquet' LIMIT 5;
+
+SELECT * FROM 'hf://datasets/microsoft/ms_marco/v1.1/train-00000-of-00001.parquet' LIMIT 5;
+
+SELECT * FROM 'hf://datasets/microsoft/ms_marco/v1.1/validation-00000-of-00001.parquet' LIMIT 5;
+```
+
+## DuckDB JSON Extraction Functions:
+
+https://duckdb.org/docs/stable/data/json/json_functions
+
+```sql
+
+SELECT json_extract(passages, '$is_selected') FROM 'hf://datasets/microsoft/ms_marco/v1.1/test-00000-of-00001.parquet' LIMIT 1;
+
+--- {
+--    'is_selected': 
+--      [0, 0, 1, 0, 0, 0, 0], 
+--    'passage_text': 
+--      [We have been feeding our back yard squirrels for the fall and winter and we noticed that a few of them have missing f… 
+--  }
+SELECT json_extract(passages, '$.is_selected') FROM 'hf://datasets/microsoft/ms_marco/v1.1/test-00000-of-00001.parquet' LIMIT 1;
+-- [0,0,1,0,0,0,0]   
+
+SELECT json_extract(passages, '$.passage_text') FROM 'hf://datasets/microsoft/ms_marco/v1.1/test-00000-of-00001.parquet' LIMIT 1;
+-- ["We have been feeding our back yard squirrels for the fall and winter and we noticed that a few of them have missing fur. One has a patch missing down his back and under bo…  │
+
+SELECT json_extract(passages, '$.passage_text[1]') FROM 'hf://datasets/microsoft/ms_marco/v1.1/test-00000-of-00001.parquet' LIMIT 1;
+--  "Critters cannot stand the smell of human hair, so sprinkling a barrier of hair clippings around your garden, or lightly working it into the soil when you plant bulbs, appar…  │
+
+SELECT passages -> '$.is_selected' FROM 'hf://datasets/microsoft/ms_marco/v1.1/test-00000-of-00001.parquet' LIMIT 2;
+-- 
+-- [0,0,1,0,0,0,0]               │
+-- [0,1,0,0,0,0,0,0,0]
+  
+```
+
+## Local Parquet files
+
+```sql
+SELECT * FROM '.data/ms_marco_v1.1/test.parquet' LIMIT 10;
+
+SELECT COUNT(*) FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 10;
+
+SELECT passages -> '$.is_selected' FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 2;
+
+SELECT MAX(query_id) as max, MIN(query_id) as min, COUNT (*), max-min + 1 as diff FROM  '.data/ms_marco_v1.1/train.parquet';
+```
+
+Processed Triples Dataset
+```sql
+SELECT * FROM '.data/processed/test_triples.parquet' LIMIT 10;
+
+SELECT COUNT(*) FROM '.data/processed/train_triples.parquet' LIMIT 10;
+
+
+
+--
+-- ┌────────┬───────┬──────────────┬───────┐
+-- │  max   │  min  │ count_star() │ diff  │
+-- │ int32  │ int32 │    int64     │ int32 │
+-- ├────────┼───────┼──────────────┼───────┤
+-- │ 102128 │ 19699 │    82326     │ 82430 │
+-- └────────┴───────┴──────────────┴───────┘
+--
+```
