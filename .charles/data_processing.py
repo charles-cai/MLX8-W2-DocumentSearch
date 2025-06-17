@@ -7,6 +7,7 @@ import pandas as pd
 from datasets import load_dataset
 from dotenv import load_dotenv
 import numpy as np
+from tqdm import tqdm
 
 from logging_utils import setup_logging, with_exception_logging
 
@@ -90,57 +91,86 @@ class DataProcessing:
         
         return parquet_file_path
 
+    def add_negative_query_ids(self, split):
+        """
+        Add a negative_query_id column to the parquet file for the given split,
+        such that each negative_query_id is a random query_id not equal to its own.
+        """
+        parquet_file_path = self._check_parquet_file(split)
+        self.logger.info(f"Reading parquet file for negative_query_id generation: {parquet_file_path}")
+        df = pd.read_parquet(parquet_file_path)
+        query_ids = df['query_id'].tolist()
+        # Generate derangement
+        def derangement(lst):
+            while True:
+                shuffled = lst[:]
+                np.random.shuffle(shuffled)
+                if all(a != b for a, b in zip(lst, shuffled)):
+                    return shuffled
+        negative_query_ids = derangement(query_ids)
+        df['negative_query_id'] = negative_query_ids
+        # Save back to parquet (overwrite)
+        df.to_parquet(parquet_file_path, index=False)
+        self.logger.info(f"Added negative_query_id column and saved to: {parquet_file_path}")
+
     def gen_triples(self, split):
         """
-        Generate training triples from the parquet file using columnar operations.
-        Returns a DataFrame with columns: query_id, query, positive_docs, negative_query_id, negative_docs
+        Generate training triples from the parquet file by parsing JSON passages.
+        Each record is expanded into multiple rows based on passage_text array.
+        Returns a DataFrame with columns: id, query, query_id, is_selected, negative_query_id, positive_doc
         """
-        try:
-            parquet_file_path = self._check_parquet_file(split)
-            self.logger.info(f"Reading parquet file: {parquet_file_path}")
+        parquet_file_path = self._check_parquet_file(split)
+        self.logger.info(f"Reading parquet file: {parquet_file_path}")
+        df = pd.read_parquet(parquet_file_path)
+        total_records = len(df)
+        
+        # Ensure negative_query_id exists
+        if 'negative_query_id' not in df.columns:
+            self.logger.info("negative_query_id column not found, generating...")
+            self.add_negative_query_ids(split)
             df = pd.read_parquet(parquet_file_path)
-            total_records = len(df)
 
-            # Generate negative indices (not equal to their own index)
-            indices = df.index.to_numpy()
-            neg_indices = np.random.randint(0, total_records, size=total_records)
-            # Ensure negative index is not the same as positive index
-            mask = neg_indices == indices
-            while mask.any():
-                neg_indices[mask] = np.random.randint(0, total_records, size=mask.sum())
-                mask = neg_indices == indices
+        self.logger.info(f"Processing {total_records} records to generate triples...")
+        
+        results = []
+        auto_id = 1
 
-            # Gather negative rows
-            negative_rows = df.iloc[neg_indices].reset_index(drop=True)
+        for idx, row in tqdm(df.iterrows(), total=total_records, desc="Processing records"):
+            passages_data = row['passages']
+            passage_texts = passages_data['passage_text']
+            is_selected = passages_data['is_selected']
 
-            # Only keep passage_text from passages for positive and negative docs
-            def extract_passage_text(passages):
-                # passages is expected to be a dict with 'passage_text' key
-                if isinstance(passages, dict) and 'passage_text' in passages:
-                    return passages['passage_text']
-                # If it's a list of dicts, fallback for other formats
-                if isinstance(passages, list) and len(passages) > 0 and isinstance(passages[0], dict):
-                    return [p.get('passage_text', '') for p in passages]
-                return []
+            # Validate array lengths
+            if len(is_selected) != len(passage_texts):
+                self.logger.error(f"Mismatch in array lengths for query_id {row['query_id']}: is_selected={len(is_selected)}, passage_text={len(passage_texts)}, skipping")
+                continue
 
-            result_df = pd.DataFrame({
-                'query_id': df['query_id'],
-                'query': df['query'],
-                'positive_docs': df['passages'].apply(extract_passage_text),
-                'negative_query_id': negative_rows['query_id'],
-                'negative_docs': negative_rows['passages'].apply(extract_passage_text)
-            })
+            # For each passage_text, treat as positive_doc, generate a triple
+            for i, passage_text in enumerate(passage_texts):
+                results.append({
+                    'id': auto_id,
+                    'query': row['query'],
+                    'query_id': row['query_id'],
+                    'is_selected': is_selected[i],  # Use actual value
+                    'negative_query_id': row['negative_query_id'],
+                    'positive_doc': passage_text
+                })
+                auto_id += 1
 
-            self.logger.info(f"Generated {len(result_df)} triples from {split} split")
-            os.makedirs(self.MLX_DATASET_OUTPUT_DIR, exist_ok=True)
-            triples_file_path = os.path.join(self.MLX_DATASET_OUTPUT_DIR, f"{split}_triples.parquet")
-            result_df.to_parquet(triples_file_path, index=False)
-            self.logger.info(f"Saved triples to: {triples_file_path}")
-            return result_df
-
-        except Exception as e:
-            self.logger.error(f"Failed to generate triples for {split}: {str(e)}")
-            raise
+        result_df = pd.DataFrame(results)
+        
+        if len(result_df) == 0:
+            self.logger.error("No valid triples generated")
+            return pd.DataFrame()
+        
+        self.logger.info(f"Generated {len(result_df)} triples from {total_records} original records")
+        
+        os.makedirs(self.MLX_DATASET_OUTPUT_DIR, exist_ok=True)
+        triples_file_path = os.path.join(self.MLX_DATASET_OUTPUT_DIR, f"{split}_triples.parquet")
+        result_df.to_parquet(triples_file_path, index=False)
+        self.logger.info(f"Saved triples to: {triples_file_path}")
+        
+        return result_df
 
 @with_exception_logging
 def main():
@@ -189,7 +219,7 @@ def main():
             logger.info("No action flags provided. Use --download to download datasets or --gen-triples to generate triples.")
         
     except Exception as e:
-        logger.error(f"Processing failed: {str(e)}")
+        logger.error(f"Processing failed: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
