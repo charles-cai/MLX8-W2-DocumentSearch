@@ -61,7 +61,8 @@ def train_from_triplets(triplets_file: str,
                        batch_size: int = 32,
                        learning_rate: float = 1e-4,
                        num_workers: int = 0,  # Default to 0 to avoid multiprocessing issues
-                       save_model: bool = True):
+                       save_model: bool = True,
+                       checkpoint_dir: str = "./checkpoints"):
     """Train two-tower model from pre-generated triplets."""
     
     print("🚀 Two-Tower Training from Pre-generated Triplets")
@@ -74,7 +75,15 @@ def train_from_triplets(triplets_file: str,
     
     # Load pre-trained embeddings
     print("📦 Loading pre-trained embeddings...")
-    checkpoint = torch.load("msmarco_word2vec.pt", map_location='cpu')
+    embeddings_path = os.path.join(checkpoint_dir, "msmarco_word2vec.pt")
+    
+    if not os.path.exists(embeddings_path):
+        print(f"❌ Error: Embeddings file not found at: {embeddings_path}")
+        print("💡 Make sure to run the CBOW training script first:")
+        print(f"   uv run text_embeddings/train_text_embeddings_cbow_msmarco.py -c {checkpoint_dir}")
+        raise FileNotFoundError(f"Pre-trained embeddings not found: {embeddings_path}")
+    
+    checkpoint = torch.load(embeddings_path, map_location='cpu')
     embedding_matrix = checkpoint["embedding_matrix"]
     word_to_index = checkpoint["word_to_index"]
     index_to_word = checkpoint["index_to_word"]
@@ -210,8 +219,12 @@ def train_from_triplets(triplets_file: str,
     
     # Save model if requested
     if save_model:
+        # Create checkpoint directory if it doesn't exist
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_save_path = f"two_tower_model_{timestamp}.pt"
+        model_filename = f"two_tower_model_{timestamp}.pt"
+        model_save_path = os.path.join(checkpoint_dir, model_filename)
         
         torch.save({
             'model_state_dict': model.state_dict(),
@@ -311,6 +324,8 @@ def main():
                        help="Number of DataLoader workers (default: 0 for safety)")
     parser.add_argument("--no-save", action="store_true",
                        help="Don't save the trained model")
+    parser.add_argument("--checkpoint-dir", "-c", default="./checkpoints",
+                       help="Directory to save model checkpoints (default: ./checkpoints)")
     
     args = parser.parse_args()
     
@@ -326,7 +341,8 @@ def main():
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         num_workers=args.num_workers,
-        save_model=not args.no_save
+        save_model=not args.no_save,
+        checkpoint_dir=args.checkpoint_dir
     )
     
     print(f"\n🎉 Training completed successfully!")
