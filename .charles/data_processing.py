@@ -6,10 +6,8 @@ import json
 import pandas as pd
 from datasets import load_dataset
 from dotenv import load_dotenv
-import random
 import numpy as np
 
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from logging_utils import setup_logging, with_exception_logging
 
 class DataProcessing:
