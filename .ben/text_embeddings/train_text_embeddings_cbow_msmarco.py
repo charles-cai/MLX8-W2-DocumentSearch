@@ -11,6 +11,7 @@ from gensim.models import Word2Vec
 from gensim.utils import simple_preprocess
 from tqdm import tqdm
 import re
+import argparse
 from collections import defaultdict
 from datasets import load_dataset
 
@@ -152,9 +153,14 @@ def extract_embeddings_and_mappings(model):
     
     return embedding_matrix, word_to_index, index_to_word
 
-def save_embeddings(embedding_matrix, word_to_index, index_to_word, filename="msmarco_word2vec.pt"):
+def save_embeddings(embedding_matrix, word_to_index, index_to_word, checkpoint_dir="./checkpoints", filename="msmarco_word2vec.pt"):
     """Save embeddings and mappings using torch.save."""
-    print(f"Saving embeddings to {filename}...")
+    # Construct full path
+    full_path = os.path.join(checkpoint_dir, filename)
+    print(f"Saving embeddings to {full_path}...")
+    
+    # Create checkpoint directory if it doesn't exist
+    os.makedirs(checkpoint_dir, exist_ok=True)
     
     # Convert numpy array to torch tensor
     embedding_weights = torch.from_numpy(embedding_matrix).float()
@@ -164,13 +170,14 @@ def save_embeddings(embedding_matrix, word_to_index, index_to_word, filename="ms
         "embedding_matrix": embedding_weights,
         "word_to_index": word_to_index,
         "index_to_word": index_to_word
-    }, filename)
+    }, full_path)
     
-    print(f"Successfully saved embeddings to {filename}")
+    print(f"Successfully saved embeddings to {full_path}")
 
-def main():
+def main(checkpoint_dir="./checkpoints"):
     """Main function to run the complete pipeline."""
     print("Starting CBOW implementation with MS Marco dataset")
+    print(f"Checkpoints will be saved to: {checkpoint_dir}")
     
     # Step 1: Download MS Marco data from Hugging Face (with caching)
     dataset = download_msmarco_data(cache_dir="./data")
@@ -189,7 +196,7 @@ def main():
     embedding_matrix, word_to_index, index_to_word = extract_embeddings_and_mappings(model)
     
     # Step 5: Save using torch.save
-    save_embeddings(embedding_matrix, word_to_index, index_to_word)
+    save_embeddings(embedding_matrix, word_to_index, index_to_word, checkpoint_dir)
     
     # Display some statistics
     print("\n=== Model Statistics ===")
@@ -207,4 +214,10 @@ def main():
     print("\nCBOW model training and saving completed successfully!")
 
 if __name__ == "__main__":
-    main() 
+    parser = argparse.ArgumentParser(description='Train CBOW model with MS Marco dataset')
+    parser.add_argument('--checkpoint-dir', '-c', 
+                       default='./checkpoints',
+                       help='Directory to save checkpoints (default: ./checkpoints)')
+    
+    args = parser.parse_args()
+    main(checkpoint_dir=args.checkpoint_dir) 
