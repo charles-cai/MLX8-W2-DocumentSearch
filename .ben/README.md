@@ -97,7 +97,7 @@ Training time: 245.67 seconds (4.09 minutes)
 Trains a two-tower retrieval model using pre-generated triplets and CBOW embeddings.
 
 #### Prerequisites
-1. **CBOW Embeddings**: Must have `msmarco_word2vec.pt` file
+1. **CBOW Embeddings**: Must have `msmarco_word2vec.pt` file in the checkpoint directory
 2. **Triplets**: Must have generated triplets using `preprocessing/generate_triplets.py`
 
 #### Usage
@@ -111,6 +111,10 @@ uv run training/train_two_tower_from_triplets.py ./data/msmarco_triplets_50k_202
   --batch-size 64 \
   --learning-rate 2e-4 \
   --num-workers 4
+
+# With custom checkpoint directory
+uv run training/train_two_tower_from_triplets.py ./data/msmarco_triplets_50k_20241201_143022.pkl \
+  --checkpoint-dir ./my_models/
 
 # Training without saving model
 uv run training/train_two_tower_from_triplets.py ./data/msmarco_triplets_50k_20241201_143022.pkl \
@@ -126,6 +130,7 @@ uv run training/train_two_tower_from_triplets.py ./data/msmarco_triplets_50k_202
   - `--batch-size` (default: 32): Batch size for training
   - `--learning-rate` (default: 1e-4): Learning rate
   - `--num-workers` (default: 0): DataLoader workers (0 for safety)
+  - `--checkpoint-dir`, `-c` (default: `./checkpoints`): Directory for model checkpoints
   - `--no-save`: Don't save the trained model
 
 #### Features
@@ -135,10 +140,12 @@ uv run training/train_two_tower_from_triplets.py ./data/msmarco_triplets_50k_202
 - **Quick Testing**: Performs similarity tests after training
 
 #### Output Files
-- **Model**: `two_tower_model_{timestamp}.pt`
-- **Training Log**: `two_tower_model_{timestamp}_training_log.json`
+- **Model**: `{checkpoint_dir}/two_tower_model_{timestamp}.pt`
+- **Training Log**: `{checkpoint_dir}/two_tower_model_{timestamp}_training_log.json`
 
 ## 🔄 Complete Workflow
+
+### Option 1: Default Directories
 
 ### Step 1: Train CBOW Embeddings
 ```bash
@@ -154,21 +161,34 @@ uv run preprocessing/generate_triplets.py --max-samples 50000
 
 ### Step 3: Train Two-Tower Model
 ```bash
-# Train two-tower model
+# Train two-tower model (uses embeddings from ./checkpoints/, saves model to ./checkpoints/)
 uv run training/train_two_tower_from_triplets.py ./data/msmarco_triplets_50k_*.pkl --epochs 3
+```
+
+### Option 2: Custom Checkpoint Directory
+
+```bash
+# Step 1: Train CBOW embeddings to custom directory
+uv run text_embeddings/train_text_embeddings_cbow_msmarco.py -c ./my_models/
+
+# Step 2: Generate triplets (same as before)
+uv run preprocessing/generate_triplets.py --max-samples 50000
+
+# Step 3: Train two-tower model using same custom directory
+uv run training/train_two_tower_from_triplets.py ./data/msmarco_triplets_50k_*.pkl -c ./my_models/ --epochs 3
 ```
 
 ## 📊 Expected File Structure After Training
 
 ```
 ├── checkpoints/
-│   └── msmarco_word2vec.pt                    # CBOW embeddings
+│   ├── msmarco_word2vec.pt                    # CBOW embeddings
+│   ├── two_tower_model_20241201_150234.pt     # Trained two-tower model
+│   └── two_tower_model_20241201_150234_training_log.json
 ├── data/
 │   ├── processed_texts.pkl                    # Cached processed texts
 │   ├── msmarco_triplets_50k_20241201_143022.pkl   # Training triplets
 │   └── msmarco_triplets_50k_20241201_143022_metadata.json
-├── two_tower_model_20241201_150234.pt         # Trained model
-└── two_tower_model_20241201_150234_training_log.json
 ```
 
 ## 🎯 Performance Tips
@@ -190,6 +210,7 @@ uv run training/train_two_tower_from_triplets.py ./data/msmarco_triplets_50k_*.p
 **1. "File not found" errors**
 - Ensure you've run the CBOW training before two-tower training
 - Check that triplets file path is correct
+- If using custom checkpoint directories, ensure both scripts use the same directory
 
 **2. Memory issues**
 - Reduce `--batch-size` for two-tower training
@@ -207,8 +228,8 @@ ls -la checkpoints/msmarco_word2vec.pt
 # Check available triplets
 ls -la data/msmarco_triplets_*.pkl
 
-# Verify model output
-ls -la two_tower_model_*.pt
+# Verify two-tower model output
+ls -la checkpoints/two_tower_model_*.pt
 ```
 
 ## 📈 Expected Training Times
