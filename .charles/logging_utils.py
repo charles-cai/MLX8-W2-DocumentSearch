@@ -44,6 +44,10 @@ def setup_logging(name=None):
     logger = logging.getLogger(name or __name__)
     logger.setLevel(logging.INFO)
     
+    # Remove all handlers associated with the logger (prevents duplicate logs)
+    if logger.hasHandlers():
+        logger.handlers.clear()
+    
     # Create console handler with colored formatter
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(ColoredFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
