@@ -21,4 +21,6 @@ dependencies = [
     "datasets>=2.19.2",
     "colorama>=0.4.6",
     "sentence-transformers>=4.1.0",
+    "gensim>=4.3.3",
+    "redis>=6.2.0",
 ]
