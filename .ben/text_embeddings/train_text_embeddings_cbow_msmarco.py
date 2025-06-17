@@ -7,6 +7,7 @@ import os
 import numpy as np
 import torch
 import pickle
+import time
 from gensim.models import Word2Vec
 from gensim.utils import simple_preprocess
 from tqdm import tqdm
@@ -113,6 +114,9 @@ def train_cbow_model(texts):
     """Train CBOW model using gensim Word2Vec."""
     print("Training CBOW model using gensim...")
     
+    # Start timing
+    start_time = time.time()
+    
     # CBOW parameters
     model = Word2Vec(
         sentences=texts,
@@ -129,10 +133,15 @@ def train_cbow_model(texts):
         seed=42           # For reproducibility
     )
     
+    # End timing
+    end_time = time.time()
+    training_time = end_time - start_time
+    
     print(f"Vocabulary size: {len(model.wv.key_to_index)}")
     print(f"Vector size: {model.wv.vector_size}")
+    print(f"Training completed in {training_time:.2f} seconds ({training_time/60:.2f} minutes)")
     
-    return model
+    return model, training_time
 
 def extract_embeddings_and_mappings(model):
     """Extract embedding matrix and word mappings from trained model."""
@@ -190,7 +199,7 @@ def main(checkpoint_dir="./checkpoints"):
         return
     
     # Step 3: Train CBOW model
-    model = train_cbow_model(texts)
+    model, training_time = train_cbow_model(texts)
     
     # Step 4: Extract embeddings and mappings
     embedding_matrix, word_to_index, index_to_word = extract_embeddings_and_mappings(model)
@@ -203,6 +212,9 @@ def main(checkpoint_dir="./checkpoints"):
     print(f"Vocabulary size: {len(word_to_index)}")
     print(f"Embedding dimension: {embedding_matrix.shape[1]}")
     print(f"Total parameters: {embedding_matrix.shape[0] * embedding_matrix.shape[1]:,}")
+    print(f"Training time: {training_time:.2f} seconds ({training_time/60:.2f} minutes)")
+    if training_time > 3600:
+        print(f"                {training_time/3600:.2f} hours")
     
     # Show some example words and their embeddings
     print("\n=== Sample Words ===")
