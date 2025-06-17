@@ -15,10 +15,13 @@ class BertInference:
 
         hf_cache_dir = os.getenv("HF_CACHE_DIR", "./.data/hf/.cache")
         self.tokenizer = BertTokenizer.from_pretrained(model_name, cache_dir=hf_cache_dir)
-        self.model = BertModel.from_pretrained(model_name, cache_dir=hf_cache_dir)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.logger.info(f"Using device: {self.device}")
+        self.model = BertModel.from_pretrained(model_name, cache_dir=hf_cache_dir).to(self.device)
 
     def get_embedding(self, text):
         inputs = self.tokenizer(text, return_tensors='pt', truncation=True, padding=True)
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
         with torch.no_grad():
             outputs = self.model(**inputs)
         # Use the [CLS] token embedding as sentence representation
