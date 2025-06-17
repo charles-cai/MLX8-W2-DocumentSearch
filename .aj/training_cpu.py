@@ -26,38 +26,55 @@ with open("triples_full.pkl", "rb") as f:
 # -------------------------------
 
 device = torch.device("cpu")
-
-# Maximize CPU usage
-torch.set_num_threads(12)  # Use all logical cores
+torch.set_num_threads(12)
 
 tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/msmarco-MiniLM-L6-v3')
 model     = AutoModel.from_pretrained('sentence-transformers/msmarco-MiniLM-L6-v3').to(device)
 embed_dim = model.config.hidden_size
 
-def tokenize_and_embed(texts, batch_size=512, show_progress=True):
-    token_embeddings = []
-    lengths = []
+def stream_tokenize_and_embed(texts, embed_out_path, lens_out_path, batch_size=512, show_progress=True):
     total = len(texts)
     it = range(0, total, batch_size)
     if show_progress:
-        it = tqdm(it, desc="Embedding", total=(total+batch_size-1)//batch_size)
-    for i in it:
-        batch_texts = texts[i:i+batch_size]
-        enc = tokenizer(batch_texts, padding=True, truncation=True, return_tensors="pt").to(device)
-        with torch.no_grad():
-            output = model(**enc).last_hidden_state.cpu().numpy().astype(np.float16)  # RAM efficient
-        token_embeddings.extend([emb for emb in output])  # append each doc in batch
-        lengths.extend(enc['attention_mask'].sum(dim=1).cpu().tolist())
-    return token_embeddings, lengths
+        it = tqdm(it, desc=f"Embedding & Saving to {embed_out_path}", total=(total+batch_size-1)//batch_size)
+    with open(embed_out_path, 'ab') as f_emb, open(lens_out_path, 'ab') as f_len:
+        for i in it:
+            batch_texts = texts[i:i+batch_size]
+            enc = tokenizer(batch_texts, padding=True, truncation=True, return_tensors="pt").to(device)
+            with torch.no_grad():
+                # Use float16 for RAM/disk efficiency
+                output = model(**enc).last_hidden_state.cpu().numpy().astype(np.float16)  # (batch, seq_len, embed_dim)
+            # Save each batch as a list of arrays
+            pickle.dump([emb for emb in output], f_emb)
+            lengths = enc['attention_mask'].sum(dim=1).cpu().tolist()
+            pickle.dump(lengths, f_len)
 
 # Flatten out list of docs if needed
 query_texts   = [t[0] for t in triples]
 rel_doc_texts = [doc for docs in [t[1] for t in triples] for doc in docs]
 irrel_doc_texts = [doc for docs in [t[2] for t in triples] for doc in docs]
 
-query_embeds, query_lens         = tokenize_and_embed(query_texts, batch_size=512)
-rel_doc_embeds, rel_doc_lens     = tokenize_and_embed(rel_doc_texts, batch_size=512)
-irrel_doc_embeds, irrel_doc_lens = tokenize_and_embed(irrel_doc_texts, batch_size=512)
+stream_tokenize_and_embed(query_texts,   "query_embeds.pkl",   "query_lens.pkl",   batch_size=512)
+stream_tokenize_and_embed(rel_doc_texts, "rel_doc_embeds.pkl", "rel_doc_lens.pkl", batch_size=512)
+stream_tokenize_and_embed(irrel_doc_texts, "irrel_doc_embeds.pkl", "irrel_doc_lens.pkl", batch_size=512)
+
+
+
+# def load_all_pickle_batches(filename):
+#     data = []
+#     with open(filename, 'rb') as f:
+#         while True:
+#             try:
+#                 batch = pickle.load(f)
+#                 data.extend(batch)
+#             except EOFError:
+#                 break
+#     return data
+
+# query_embeds = load_all_pickle_batches("query_embeds.pkl")
+# query_lens   = load_all_pickle_batches("query_lens.pkl")
+# # Same for rel_doc_embeds, etc.
+
 
 
 # -----------------------------
