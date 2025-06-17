@@ -37,45 +37,47 @@ class DataProcessing:
         self.logger.info(f"MLX Triple split: {self.MLX_DATASET_TRIPLE_SPLIT}")
 
     def download_and_save(self, split):
+        self.logger.info(f"Starting download_and_save for split: {split}")
+        base_output_dir = os.path.join(
+            self.HF_DATASET_OUTPUT_DIR, f"{self.HF_DATASET}_{self.HF_DATASET_VERSION}"
+        )
+        os.makedirs(base_output_dir, exist_ok=True)
+        parquet_file_path = os.path.join(base_output_dir, f"{split}.parquet")
+        
+        # Check if file already exists using existing method
         try:
-            base_output_dir = os.path.join(
-                self.HF_DATASET_OUTPUT_DIR, f"{self.HF_DATASET}_{self.HF_DATASET_VERSION}"
-            )
-            os.makedirs(base_output_dir, exist_ok=True)
-            parquet_file_path = os.path.join(base_output_dir, f"{split}.parquet")
-            
-            # Check if file already exists
-            if os.path.exists(parquet_file_path):
-                self.logger.warning(f"File already exists: {parquet_file_path}")
-                response = input(f"Overwrite existing {split}.parquet file? [Y/n]: ").strip().lower()
-                if response in ['n', 'no']:
-                    self.logger.info(f"Skipping download for {split} split")
-                    return
-                elif response == '' or response in ['y', 'yes']:
-                    self.logger.info(f"Proceeding with overwrite for {split} split")
-                else:
-                    self.logger.warning(f"Invalid response '{response}', skipping download for {split} split")
-                    return
-            
-            self.logger.info(f"Starting download for split: {split}")
-            
-            dataset = load_dataset(
-                f"{self.HF_ORGANIZATION}/{self.HF_DATASET}",
-                self.HF_DATASET_VERSION,
-                split=split,
-                token=self.HF_TOKEN if self.HF_TOKEN else None
-            )
-            
-            self.logger.info(f"Saving {split} dataset to: {parquet_file_path}")
-            dataset.to_parquet(parquet_file_path)
-            
-            self.logger.success(f"Successfully saved {split} dataset ({len(dataset)} records)")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to download and save {split} dataset: {str(e)}")
-            raise
+            self._check_parquet_file(split)
+            self.logger.warning(f"File already exists: {parquet_file_path}")
+            response = input(f"Overwrite existing {split}.parquet file? [Y/n]: ").strip().lower()
+            if response in ['n', 'no']:
+                self.logger.info(f"Skipping download for {split} split")
+                return
+            elif response == '' or response in ['y', 'yes', 'Y']:
+                self.logger.info(f"Proceeding with overwrite for {split} split")
+            else:
+                self.logger.warning(f"Invalid response '{response}', skipping download for {split} split")
+                return
+        except FileNotFoundError:
+            # File doesn't exist, proceed with download
+            pass
+        
+        self.logger.info(f"Starting download for split: {split}")
+        
+        dataset = load_dataset(
+            f"{self.HF_ORGANIZATION}/{self.HF_DATASET}",
+            self.HF_DATASET_VERSION,
+            split=split,
+            token=self.HF_TOKEN if self.HF_TOKEN else None
+        )
+        
+        self.logger.info(f"Saving {split} dataset to: {parquet_file_path}")
+        dataset.to_parquet(parquet_file_path)
+        
+        self.logger.success(f"Successfully saved {split} dataset ({len(dataset)} records)")
+        self.logger.info(f"Completed download_and_save for split: {split}")
 
     def _check_parquet_file(self, split):
+        self.logger.debug(f"Checking parquet file for split: {split}")
         """
         Check if parquet file exists for the given split.
         Returns the file path if exists, raises FileNotFoundError if not.
@@ -89,31 +91,11 @@ class DataProcessing:
             self.logger.error(f"Parquet file not found: {parquet_file_path}")
             raise FileNotFoundError(f"Parquet file not found: {parquet_file_path}")
         
+        self.logger.debug(f"Parquet file found: {parquet_file_path}")
         return parquet_file_path
-
-    def add_negative_query_ids(self, split):
-        """
-        Add a negative_query_id column to the parquet file for the given split,
-        such that each negative_query_id is a random query_id not equal to its own.
-        """
-        parquet_file_path = self._check_parquet_file(split)
-        self.logger.info(f"Reading parquet file for negative_query_id generation: {parquet_file_path}")
-        df = pd.read_parquet(parquet_file_path)
-        query_ids = df['query_id'].tolist()
-        # Generate derangement
-        def derangement(lst):
-            while True:
-                shuffled = lst[:]
-                np.random.shuffle(shuffled)
-                if all(a != b for a, b in zip(lst, shuffled)):
-                    return shuffled
-        negative_query_ids = derangement(query_ids)
-        df['negative_query_id'] = negative_query_ids
-        # Save back to parquet (overwrite)
-        df.to_parquet(parquet_file_path, index=False)
-        self.logger.info(f"Added negative_query_id column and saved to: {parquet_file_path}")
-
+    
     def gen_triples(self, split):
+        self.logger.info(f"Starting gen_triples for split: {split}")
         """
         Generate training triples from the parquet file by parsing JSON passages.
         Each record is expanded into multiple rows based on passage_text array.
@@ -127,8 +109,7 @@ class DataProcessing:
         # Ensure negative_query_id exists
         if 'negative_query_id' not in df.columns:
             self.logger.info("negative_query_id column not found, generating...")
-            self.add_negative_query_ids(split)
-            df = pd.read_parquet(parquet_file_path)
+            df = self.add_negative_query_ids(split, df)
 
         self.logger.info(f"Processing {total_records} records to generate triples...")
         
@@ -136,9 +117,8 @@ class DataProcessing:
         auto_id = 1
 
         for idx, row in tqdm(df.iterrows(), total=total_records, desc="Processing records"):
-            passages_data = row['passages']
-            passage_texts = passages_data['passage_text']
-            is_selected = passages_data['is_selected']
+            passage_texts = row['passages']['passage_text']
+            is_selected = row['passages']['is_selected']
 
             # Validate array lengths
             if len(is_selected) != len(passage_texts):
@@ -150,10 +130,10 @@ class DataProcessing:
                 results.append({
                     'id': auto_id,
                     'query': row['query'],
+                    'answer': row['answers'],  # Fix: use 'answers' and add comma
                     'query_id': row['query_id'],
                     'is_selected': is_selected[i],  # Use actual value
-                    'negative_query_id': row['negative_query_id'],
-                    'positive_doc': passage_text
+                    'positive_doc': passage_text,  # Fix: use passage_text variable
                 })
                 auto_id += 1
 
@@ -165,12 +145,63 @@ class DataProcessing:
         
         self.logger.info(f"Generated {len(result_df)} triples from {total_records} original records")
         
+        # Randomize negative id and negative_query_id columns
+        result_df = self.def_randomize_negative_query_id(result_df)
+        
         os.makedirs(self.MLX_DATASET_OUTPUT_DIR, exist_ok=True)
         triples_file_path = os.path.join(self.MLX_DATASET_OUTPUT_DIR, f"{split}_triples.parquet")
         result_df.to_parquet(triples_file_path, index=False)
         self.logger.info(f"Saved triples to: {triples_file_path}")
         
+        self.logger.info(f"Completed gen_triples for split: {split}")
         return result_df
+
+    def def_randomize_negative_query_id(self, df):
+        self.logger.info("Starting def_randomize_negative_query_id")
+        
+        # Use numpy arrays for faster operations
+        ids = df['id'].values
+        query_ids = df['query_id'].values
+        positive_docs = df['positive_doc'].values
+        n = len(ids)
+
+        # Optimized derangement using numpy
+        def fast_derangement(arr1, arr2):
+            indices = np.arange(n)
+            max_attempts = 1000
+            
+            for _ in range(max_attempts):
+                np.random.shuffle(indices)
+                if np.all(arr2 != arr2[indices]):
+                    return arr1[indices], arr2[indices]
+            
+            # Fallback: manual swap if needed
+            while np.any(arr2 == arr2[indices]):
+                conflicts = np.where(arr2 == arr2[indices])[0]
+                if len(conflicts) >= 2:
+                    indices[conflicts[0]], indices[conflicts[1]] = indices[conflicts[1]], indices[conflicts[0]]
+                else:
+                    # Find a non-conflicting position
+                    for i in range(n):
+                        if i not in conflicts and arr2[conflicts[0]] != arr2[i]:
+                            indices[conflicts[0]], indices[i] = indices[i], indices[conflicts[0]]
+                            break
+            
+            return arr1[indices], arr2[indices]
+
+        negative_ids, negative_query_ids = fast_derangement(ids, query_ids)
+        
+        # Vectorized lookup for negative_doc using negative_ids
+        id_to_doc_map = dict(zip(ids, positive_docs))
+        negative_docs = np.array([id_to_doc_map[neg_id] for neg_id in negative_ids])
+        
+        df = df.copy()
+        df['negative_id'] = negative_ids
+        df['negative_query_id'] = negative_query_ids
+        df['negative_doc'] = negative_docs
+
+        self.logger.info("Completed def_randomize_negative_query_id")
+        return df
 
 @with_exception_logging
 def main():

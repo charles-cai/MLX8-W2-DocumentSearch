@@ -55,6 +55,8 @@ SELECT passages -> '$.is_selected' FROM 'hf://datasets/microsoft/ms_marco/v1.1/t
 ```sql
 SELECT * FROM '.data/ms_marco_v1.1/test.parquet' LIMIT 10;
 
+SELECT * FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 10;
+
 SELECT COUNT(*) FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 10;
 
 SELECT passages -> '$.is_selected' FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 2;

@@ -213,8 +213,11 @@ __pycache__/
 
 # Data and model outputs
 .data/
+.charles/.data
+
+# Redis database dump
+dump.rdb
 
 # OS generated files
 .DS_Store
-
 .ben/data
