@@ -26,6 +26,7 @@ class DataProcessing:
         self.HF_DATASET_SPLITS = os.getenv("HF_DATASET_SPLITS", "train,validation,test").split(",")
         self.HF_DATASET_OUTPUT_DIR = os.getenv("HF_DATASET_OUTPUT_DIR")
         self.MLX_DATASET_OUTPUT_DIR = os.getenv("MLX_DATASET_OUTPUT_DIR")
+        self.MLX_DATASET_TRIPLE_SPLIT = os.getenv("MLX_DATASET_TRIPLE_SPLIT", "train")
         
         if not self.HF_DATASETS_CACHE:
             self.logger.warning("HF_DATASETS_CACHE not set, using default cache location")
@@ -34,6 +35,7 @@ class DataProcessing:
         self.logger.info(f"Cache directory: {self.HF_DATASETS_CACHE}")
         self.logger.info(f"HF Output directory: {self.HF_DATASET_OUTPUT_DIR}")
         self.logger.info(f"MLX Output directory: {self.MLX_DATASET_OUTPUT_DIR}")
+        self.logger.info(f"MLX Triple split: {self.MLX_DATASET_TRIPLE_SPLIT}")
 
     def download_and_save(self, split):
         try:
@@ -171,19 +173,19 @@ def main():
         
         if args.gen_triples:
             logger.info("Generate triples flag detected, checking parquet files...")
-            # Check if all parquet files exist first
-            for split in dp.HF_DATASET_SPLITS:
-                try:
-                    dp._check_parquet_file(split)
-                except FileNotFoundError:
-                    logger.error(f"Missing parquet file for split: {split}. Run with --download first.")
-                    sys.exit(1)
+            # Only check the specific split for triple generation
+            triple_split = dp.MLX_DATASET_TRIPLE_SPLIT
+            try:
+                dp._check_parquet_file(triple_split)
+            except FileNotFoundError:
+                logger.error(f"Missing parquet file for split: {triple_split}. Run with --download first.")
+                sys.exit(1)
             
-            # Generate triples for all splits
-            for split in dp.HF_DATASET_SPLITS:
-                triples_df = dp.gen_triples(split)
-                logger.info(f"Generated {len(triples_df)} triples for {split} split")
-            logger.success("All triples generated successfully!")
+            # Generate triples only for the specified split
+            logger.info(f"Generating triples for {triple_split} split only...")
+            triples_df = dp.gen_triples(triple_split)
+            logger.info(f"Generated {len(triples_df)} triples for {triple_split} split")
+            logger.success("Triple generation completed successfully!")
         
         if not args.download and not args.gen_triples:
             logger.info("No action flags provided. Use --download to download datasets or --gen-triples to generate triples.")
