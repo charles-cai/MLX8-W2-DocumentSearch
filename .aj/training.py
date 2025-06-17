@@ -63,6 +63,22 @@ query_embeds, query_lens         = tokenize_and_embed(query_texts, batch_size=64
 rel_doc_embeds, rel_doc_lens     = tokenize_and_embed(rel_doc_texts_flat, batch_size=64)
 irrel_doc_embeds, irrel_doc_lens = tokenize_and_embed(irrel_doc_texts_flat, batch_size=64)
 
+# Save embeddings to files
+with open("query_embeds.pkl", "wb") as f:
+    pickle.dump((query_embeds, query_lens), f)
+with open("rel_doc_embeds.pkl", "wb") as f:
+    pickle.dump((rel_doc_embeds, rel_doc_lens), f)
+with open("irrel_doc_embeds.pkl", "wb") as f:
+    pickle.dump((irrel_doc_embeds, irrel_doc_lens), f)
+
+# # Load embeddings from files
+# with open("query_embeds.pkl", "rb") as f:
+#     query_embeds, query_lens = pickle.load(f)
+# with open("rel_doc_embeds.pkl", "rb") as f:
+#     rel_doc_embeds, rel_doc_lens = pickle.load(f)
+# with open("irrel_doc_embeds.pkl", "rb") as f:
+#     irrel_doc_embeds, irrel_doc_lens = pickle.load(f)
+
 
 # -----------------------------
 # 3. Define distance functions & Triplet loss function
