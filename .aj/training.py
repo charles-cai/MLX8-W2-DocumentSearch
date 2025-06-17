@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
+from datasets import load_dataset
 from collections import defaultdict
 import pickle
 import json
@@ -12,13 +13,41 @@ from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 
 
-# -------------------------------
-# 1. Load triples from file
-# -------------------------------
+# -----------------------------
+# 1. Load MS MARCO V1.1 training dataset
+# -----------------------------
 
-# Load .pkl
-with open("triples_full.pkl", "rb") as f:
-    triples = pickle.load(f)
+# This will stream the data, you don't have to download the full file
+dataset = load_dataset("microsoft/ms_marco", "v1.1", split="train")  # or "validation"
+
+# 1. Build passage pool and index mapping for fast sampling and seed for reproducibility
+passage_to_idx = dict()
+idx_to_passage = []
+for row in tqdm(dataset, desc="Building passage pool..."):
+    for p in row['passages']['passage_text']:
+        if p not in passage_to_idx:
+            passage_to_idx[p] = len(idx_to_passage)
+            idx_to_passage.append(p)
+num_passages = len(idx_to_passage)
+
+# 2. For each query, map relevant passage indices
+triples = []
+for row in tqdm(dataset, desc="Creating triples..."):
+    query = row['query']
+    relevant_passages = row['passages']['passage_text'][:10]
+    relevant_indices = [passage_to_idx[p] for p in relevant_passages]
+    
+    # For fast sampling: mask out relevant indices
+    mask = np.ones(num_passages, dtype=bool)
+    mask[relevant_indices] = False
+    irrelevant_indices = np.random.choice(np.where(mask)[0], 10, replace=False)
+    irrelevant_passages = [idx_to_passage[i] for i in irrelevant_indices]
+
+    triples.append((query, relevant_passages, irrelevant_passages))
+
+with open("triples_full.pkl", "wb") as f:
+    pickle.dump(triples, f)
+
 
 # -------------------------------
 # 2. Embed queries, rel and irrel documents using a pre-trained SentenceTransformer model
