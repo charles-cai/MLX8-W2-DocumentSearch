@@ -79,7 +79,7 @@ device = torch.device("cpu")
 torch.set_num_threads(12)
 
 num_docs = 10  # number of relevant/irrelevant docs you expect per triple
-batch_size = 512  # adjust to taste; big enough to speed up, small enough to never threaten RAM
+batch_size = 1024  # adjust to taste; big enough to speed up, small enough to never threaten RAM
 
 query_embeddings = []
 relevant_doc_embeddings = []
@@ -129,7 +129,7 @@ def process_and_save_embeddings(
                     doc_vecs = cbow_model.embeddings(torch.tensor(doc_ids))
                 irrel_embs.append(doc_vecs)
             else:
-                irrel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))(0)
+                irrel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
         while len(irrel_embs) < num_docs:
             irrel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
         irrel_doc_embeds_batch.append(irrel_embs)
@@ -321,6 +321,106 @@ def evaluate_model(qry_tower, doc_tower, val_data, distance_fn, K=1, device="cpu
 # -----------------------------
 # 11. Load validation data embeddings
 # -----------------------------
+
+# -----------------------------
+# 9. Load MS MARCO V1.1 validation dataset, process into triples and tokenize & embed
+# -----------------------------
+
+# Load triples
+with open("triples_val.pkl", "rb") as f:
+    triples_val = pickle.load(f)
+
+def preprocess(text):
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9 ]+', '', text)
+    return text.split()
+
+tokenized_triples_val = []
+for query, rel_docs, irrel_docs in tqdm(triples_val, desc="Tokenizing triples"):
+    tokenized_query = preprocess(query)
+    tokenized_rels = [preprocess(doc) for doc in rel_docs]
+    tokenized_irrels = [preprocess(doc) for doc in irrel_docs]
+    tokenized_triples_val.append((tokenized_query, tokenized_rels, tokenized_irrels))
+
+
+num_docs = 10  # number of relevant/irrelevant docs you expect per triple
+batch_size = 64  # adjust to taste; big enough to speed up, small enough to never threaten RAM
+
+query_embeddings_val = []
+relevant_doc_embeddings_val = []
+irrelevant_doc_embeddings_val = []
+
+def process_and_save_embeddings(
+    tokenized_triples_val, word_to_ix, cbow_model, 
+    query_embeds_path, rel_doc_embeds_path, irrel_doc_embeds_path,
+    batch_size=batch_size, num_docs=num_docs
+):
+    query_embeds_batch = []
+    rel_doc_embeds_batch = []
+    irrel_doc_embeds_batch = []
+    
+    for i, (tokenized_query, tokenized_rels, tokenized_irrels) in enumerate(
+        tqdm(tokenized_triples_val, desc="CBOW embedding + streaming", total=len(tokenized_triples_val))
+    ):
+        # Query: embeddings per token
+        q_ids = [word_to_ix[t] for t in tokenized_query if t in word_to_ix]
+        if q_ids:
+            with torch.no_grad():
+                q_vecs = cbow_model.embeddings(torch.tensor(q_ids))
+            query_embeds_batch.append(q_vecs)  # shape: [query_len, embed_dim]
+        else:
+            query_embeds_batch.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
+        
+        # Relevant docs: list of (doc_len, embed_dim)
+        rel_embs = []
+        for doc_tokens in tokenized_rels[:num_docs]:
+            doc_ids = [word_to_ix[t] for t in doc_tokens if t in word_to_ix]
+            if doc_ids:
+                with torch.no_grad():
+                    doc_vecs = cbow_model.embeddings(torch.tensor(doc_ids))
+                rel_embs.append(doc_vecs)
+            else:
+                rel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
+        while len(rel_embs) < num_docs:
+            rel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
+        rel_doc_embeds_batch.append(rel_embs)
+
+        # Irrelevant docs: list of (doc_len, embed_dim)
+        irrel_embs = []
+        for doc_tokens in tokenized_irrels[:num_docs]:
+            doc_ids = [word_to_ix[t] for t in doc_tokens if t in word_to_ix]
+            if doc_ids:
+                with torch.no_grad():
+                    doc_vecs = cbow_model.embeddings(torch.tensor(doc_ids))
+                irrel_embs.append(doc_vecs)
+            else:
+                irrel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
+        while len(irrel_embs) < num_docs:
+            irrel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
+        irrel_doc_embeds_batch.append(irrel_embs)
+
+        # Save every batch_size triples
+        if (i + 1) % batch_size == 0 or (i + 1) == len(tokenized_triples_val):
+            # Save as batch-lists (not stacked), because sequences are ragged
+            with open(query_embeds_path, 'ab') as fq:
+                pickle.dump(query_embeds_batch, fq)
+            with open(rel_doc_embeds_path, 'ab') as fr:
+                pickle.dump(rel_doc_embeds_batch, fr)
+            with open(irrel_doc_embeds_path, 'ab') as fi:
+                pickle.dump(irrel_doc_embeds_batch, fi)
+
+            # Free RAM
+            query_embeds_batch.clear()
+            rel_doc_embeds_batch.clear()
+            irrel_doc_embeds_batch.clear()
+
+
+# Usage example:
+process_and_save_embeddings(
+    tokenized_triples_val, word_to_ix, cbow_model,
+    "query_embeds_val.pkl", "rel_doc_embeds_val.pkl", "irrel_doc_embeds_val.pkl",
+    batch_size=batch_size, num_docs=num_docs
+)
 
 # Load them all
 query_embeds_val = load_all_batches("query_embeds_val.pkl")           # list of [query_len, embed_dim] tensors
