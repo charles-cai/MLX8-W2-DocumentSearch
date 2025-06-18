@@ -23,7 +23,7 @@ import json
 
 class TwoTowerModel(nn.Module):
     """
-    Two-Tower architecture with separate encoders for queries and documents.
+    Two-Tower architecture with separate RNN encoders for queries and documents.
     """
     
     def __init__(self, embedding_matrix: torch.Tensor, word_to_index: Dict, 
@@ -34,33 +34,40 @@ class TwoTowerModel(nn.Module):
         self.vocab_size = len(word_to_index)
         self.embedding_dim = embedding_matrix.size(1)
         self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
         
         # Shared embedding layer (frozen pre-trained embeddings)
         self.embedding = nn.Embedding.from_pretrained(embedding_matrix, freeze=True)
         
-        # Query Tower
-        self.query_encoder = nn.Sequential(
-            nn.Linear(self.embedding_dim, hidden_dim),
+        # Query Tower - RNN + Projection
+        self.query_rnn = nn.RNN(
+            input_size=self.embedding_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0,
+            bidirectional=True,
+            batch_first=True
+        )
+        self.query_projection = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),  # *2 for bidirectional
             nn.ReLU(),
             nn.Dropout(dropout),
-            *[nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout)
-            ) for _ in range(num_layers - 1)],
             nn.Linear(hidden_dim, hidden_dim)
         )
         
-        # Document Tower
-        self.document_encoder = nn.Sequential(
-            nn.Linear(self.embedding_dim, hidden_dim),
+        # Document Tower - RNN + Projection  
+        self.document_rnn = nn.RNN(
+            input_size=self.embedding_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0,
+            bidirectional=True,
+            batch_first=True
+        )
+        self.document_projection = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),  # *2 for bidirectional
             nn.ReLU(),
             nn.Dropout(dropout),
-            *[nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout)
-            ) for _ in range(num_layers - 1)],
             nn.Linear(hidden_dim, hidden_dim)
         )
         
@@ -69,7 +76,18 @@ class TwoTowerModel(nn.Module):
     
     def _init_weights(self):
         """Initialize model weights."""
-        for module in [self.query_encoder, self.document_encoder]:
+        # Initialize RNN weights
+        for rnn in [self.query_rnn, self.document_rnn]:
+            for name, param in rnn.named_parameters():
+                if 'weight_ih' in name:
+                    nn.init.xavier_uniform_(param.data)
+                elif 'weight_hh' in name:
+                    nn.init.orthogonal_(param.data)
+                elif 'bias' in name:
+                    param.data.fill_(0)
+        
+        # Initialize projection layers
+        for module in [self.query_projection, self.document_projection]:
             for layer in module:
                 if isinstance(layer, nn.Linear):
                     nn.init.xavier_uniform_(layer.weight)
@@ -97,31 +115,48 @@ class TwoTowerModel(nn.Module):
         
         return torch.tensor(token_ids, dtype=torch.long)
     
-    def encode_text(self, token_ids: torch.Tensor) -> torch.Tensor:
+    def encode_text_with_rnn(self, token_ids: torch.Tensor, rnn_layer: nn.RNN) -> torch.Tensor:
         """
-        Encode token IDs to embeddings using mean pooling.
+        Encode token IDs to embeddings using RNN.
         
         Args:
             token_ids: Token IDs tensor [batch_size, seq_len]
+            rnn_layer: RNN layer to use for encoding
             
         Returns:
-            Text embeddings [batch_size, embedding_dim]
+            Text embeddings [batch_size, hidden_dim * 2] (bidirectional)
         """
         # Get embeddings
         embeddings = self.embedding(token_ids)  # [batch_size, seq_len, embedding_dim]
         
-        # Create mask for non-padding tokens
-        mask = (token_ids != 0).float().unsqueeze(-1)  # [batch_size, seq_len, 1]
+        # Calculate actual sequence lengths (for packing)
+        seq_lengths = (token_ids != 0).sum(dim=1).cpu()  # [batch_size]
         
-        # Mean pooling with mask
-        masked_embeddings = embeddings * mask
-        pooled = masked_embeddings.sum(dim=1) / (mask.sum(dim=1) + 1e-8)
+        # Pack padded sequences for efficient RNN processing
+        packed_embeddings = nn.utils.rnn.pack_padded_sequence(
+            embeddings, seq_lengths, batch_first=True, enforce_sorted=False
+        )
         
-        return pooled
+        # Pass through RNN
+        packed_output, hidden = rnn_layer(packed_embeddings)
+        
+        # Unpack the sequences
+        rnn_output, _ = nn.utils.rnn.pad_packed_sequence(
+            packed_output, batch_first=True
+        )
+        
+        # Use the last hidden state from both directions
+        # hidden: [num_layers * num_directions, batch_size, hidden_dim]
+        # We want the last layer's hidden states from both directions
+        final_hidden = hidden[-2:, :, :]  # [2, batch_size, hidden_dim] (forward + backward)
+        final_hidden = final_hidden.transpose(0, 1).contiguous()  # [batch_size, 2, hidden_dim]
+        final_hidden = final_hidden.view(final_hidden.size(0), -1)  # [batch_size, hidden_dim * 2]
+        
+        return final_hidden
     
     def encode_query(self, query_ids: torch.Tensor) -> torch.Tensor:
         """
-        Encode queries through the query tower.
+        Encode queries through the query tower RNN.
         
         Args:
             query_ids: Query token IDs [batch_size, seq_len]
@@ -129,13 +164,17 @@ class TwoTowerModel(nn.Module):
         Returns:
             Query embeddings [batch_size, hidden_dim]
         """
-        text_emb = self.encode_text(query_ids)
-        query_emb = self.query_encoder(text_emb)
+        # Encode with query RNN
+        rnn_output = self.encode_text_with_rnn(query_ids, self.query_rnn)
+        
+        # Project to final dimension
+        query_emb = self.query_projection(rnn_output)
+        
         return F.normalize(query_emb, p=2, dim=1)  # L2 normalize
     
     def encode_document(self, doc_ids: torch.Tensor) -> torch.Tensor:
         """
-        Encode documents through the document tower.
+        Encode documents through the document tower RNN.
         
         Args:
             doc_ids: Document token IDs [batch_size, seq_len]
@@ -143,8 +182,12 @@ class TwoTowerModel(nn.Module):
         Returns:
             Document embeddings [batch_size, hidden_dim]
         """
-        text_emb = self.encode_text(doc_ids)
-        doc_emb = self.document_encoder(text_emb)
+        # Encode with document RNN
+        rnn_output = self.encode_text_with_rnn(doc_ids, self.document_rnn)
+        
+        # Project to final dimension
+        doc_emb = self.document_projection(rnn_output)
+        
         return F.normalize(doc_emb, p=2, dim=1)  # L2 normalize
     
     def forward(self, query_ids: torch.Tensor, pos_doc_ids: torch.Tensor, 

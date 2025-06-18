@@ -7,7 +7,7 @@ This repository contains scripts for training document search models using the M
 The training pipeline follows these steps:
 1. **Text Embeddings**: Train CBOW word embeddings on MS MARCO data
 2. **Triplet Generation**: Generate query-document triplets for training
-3. **Two-Tower Training**: Train a two-tower retrieval model using the triplets
+3. **Two-Tower Training**: Train a two-tower RNN-based retrieval model using the triplets
 
 ## 📁 Project Structure
 
