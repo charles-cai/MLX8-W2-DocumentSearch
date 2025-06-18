@@ -49,20 +49,12 @@ class TwoTowerTiny:
             self.mlp = torch.nn.Sequential(
                 torch.nn.Linear(300, 256),
                 torch.nn.ReLU(),
-                torch.nn.Linear(256, 128),
-                torch.nn.ReLU(),
-                torch.nn.Linear(128, 64),
-                torch.nn.ReLU(),
-                torch.nn.Linear(64, 32),
-                torch.nn.ReLU(),
-                torch.nn.Linear(32, 16),
-                torch.nn.ReLU(),
-                torch.nn.Linear(16, 1)
+                torch.nn.Linear(256, 128)
             )
 
         def forward(self, x):
-            # return self.fc(x)
-            return self.mlp(x)
+            emb = self.mlp(x)
+            return F.normalize(emb, p=2, dim=-1)  # L2 normalize
 
     class DocTower(torch.nn.Module):
         def __init__(self):
@@ -70,20 +62,12 @@ class TwoTowerTiny:
             self.mlp = torch.nn.Sequential(
                 torch.nn.Linear(300, 256),
                 torch.nn.ReLU(),
-                torch.nn.Linear(256, 128),
-                torch.nn.ReLU(),
-                torch.nn.Linear(128, 64),
-                torch.nn.ReLU(),
-                torch.nn.Linear(64, 32),
-                torch.nn.ReLU(),
-                torch.nn.Linear(32, 16),
-                torch.nn.ReLU(),
-                torch.nn.Linear(16, 1)
+                torch.nn.Linear(256, 128)
             )
 
         def forward(self, x):
-            #return self.fc(x)
-            return self.mlp(x)
+            emb = self.mlp(x)
+            return F.normalize(emb, p=2, dim=-1)  # L2 normalize
 
     def train(self):
         # Device selection
@@ -99,6 +83,15 @@ class TwoTowerTiny:
             name=self.WANDB_RUN_NAME + "_tiny"
         )
 
+        # Log environment values to wandb
+        wandb.config.update({
+            "MODEL_OUTPUT_DIR": self.MODEL_OUTPUT_DIR,
+            "NUM_EPOCHS": self.NUM_EPOCHS,
+            "BATCH_SIZE": self.BATCH_SIZE,
+            "LEARNING_RATE": self.LEARNING_RATE,
+            "MARGIN": self.MARGIN,
+        })
+
         optimizer = torch.optim.Adam(
             list(self.qry_tower.parameters()) + list(self.doc_tower.parameters()),
             lr=self.LEARNING_RATE
@@ -107,7 +100,7 @@ class TwoTowerTiny:
         # Load training data from parquet
         self.logger.info(f"Loading training data from {self.TRIPLES_EMBEDDINGS_DATA_PATH}")
         df = pd.read_parquet(self.TRIPLES_EMBEDDINGS_DATA_PATH)
-        
+
         qry = torch.tensor(np.stack(df["query_emb"].values)).float().to(self.device)
         pos = torch.tensor(np.stack(df["positive_doc_emb"].values)).float().to(self.device)
         neg = torch.tensor(np.stack(df["negative_doc_emb"].values)).float().to(self.device)
@@ -125,12 +118,13 @@ class TwoTowerTiny:
                 batch_pos = pos[i:i+self.BATCH_SIZE]
                 batch_neg = neg[i:i+self.BATCH_SIZE]
 
-                qry_score = self.qry_tower(batch_qry)
-                pos_score = self.doc_tower(batch_pos)
-                neg_score = self.doc_tower(batch_neg)
+                qry_emb = self.qry_tower(batch_qry)
+                pos_emb = self.doc_tower(batch_pos)
+                neg_emb = self.doc_tower(batch_neg)
 
-                s_pos = F.cosine_similarity(qry_score, pos_score, dim=-1)
-                s_neg = F.cosine_similarity(qry_score, neg_score, dim=-1)
+                # Cosine similarities
+                s_pos = (qry_emb * pos_emb).sum(dim=-1)
+                s_neg = (qry_emb * neg_emb).sum(dim=-1)
                 loss = torch.clamp(self.MARGIN - (s_pos - s_neg), min=0.0).mean()
 
                 optimizer.zero_grad()
