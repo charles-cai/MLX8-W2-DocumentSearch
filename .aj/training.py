@@ -5,140 +5,187 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
+from torchtext.data.utils import get_tokenizer
 from datasets import load_dataset
 from collections import defaultdict
 import pickle
 import json
+import re
 from tqdm import tqdm
-from transformers import AutoModel, AutoTokenizer
-
-
-# -----------------------------
-# 1. Load MS MARCO V1.1 training dataset
-# -----------------------------
-
-# This will stream the data, you don't have to download the full file
-dataset = load_dataset("microsoft/ms_marco", "v1.1", split="train")  # or "validation"
-
-# 1. Build passage pool and index mapping for fast sampling and seed for reproducibility
-passage_to_idx = dict()
-idx_to_passage = []
-for row in tqdm(dataset, desc="Building passage pool..."):
-    for p in row['passages']['passage_text']:
-        if p not in passage_to_idx:
-            passage_to_idx[p] = len(idx_to_passage)
-            idx_to_passage.append(p)
-num_passages = len(idx_to_passage)
-
-# 2. For each query, map relevant passage indices
-triples = []
-for row in tqdm(dataset, desc="Creating triples..."):
-    query = row['query']
-    relevant_passages = row['passages']['passage_text'][:10]
-    relevant_indices = [passage_to_idx[p] for p in relevant_passages]
-    
-    # For fast sampling: mask out relevant indices
-    mask = np.ones(num_passages, dtype=bool)
-    mask[relevant_indices] = False
-    irrelevant_indices = np.random.choice(np.where(mask)[0], 10, replace=False)
-    irrelevant_passages = [idx_to_passage[i] for i in irrelevant_indices]
-
-    triples.append((query, relevant_passages, irrelevant_passages))
-
-with open("triples_full.pkl", "wb") as f:
-    pickle.dump(triples, f)
-
-
-# -------------------------------
-# 2. Embed queries, rel and irrel documents using a pre-trained SentenceTransformer model
-# -------------------------------
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Load tokenizer and model
-tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/msmarco-MiniLM-L6-v3')
-model     = AutoModel.from_pretrained('sentence-transformers/msmarco-MiniLM-L6-v3').to(device)
-embed_dim = model.config.hidden_size  # 384 for MiniLM
+# -----------------------------
+# 1. Load Vocabulary & Pre-trained Embeddings
+# -----------------------------
+with open("vocab_new.json", "r", encoding="utf-8") as f:
+    word_to_ix = json.load(f)
 
-def tokenize_and_embed(texts, batch_size=64, show_progress=True):
-    token_embeddings = []
-    lengths = []
-    total = len(texts)
-    it = range(0, total, batch_size)
-    if show_progress:
-        it = tqdm(it, desc="Embedding", total=(total+batch_size-1)//batch_size)
-    for i in it:
-        batch_texts = texts[i:i+batch_size]
-        enc = tokenizer(batch_texts, padding=True, truncation=True, return_tensors="pt").to(device)
-        with torch.no_grad():
-            output = model(**enc).last_hidden_state  # (batch, seq_len, embed_dim)
-        # Move outputs to CPU only once
-        token_embeddings.extend(output.cpu().split(1, dim=0))
-        lengths.extend(enc['attention_mask'].sum(dim=1).cpu().tolist())
-    # Remove the batch dimension from each embedding
-    token_embeddings = [emb.squeeze(0) for emb in token_embeddings]
-    return token_embeddings, lengths
+ix_to_word = {int(i): w for w, i in word_to_ix.items()}
+vocab_size = len(word_to_ix)
 
-query_texts   = [t[0] for t in triples]
-rel_doc_texts = [t[1] for t in triples]
-irrel_doc_texts = [t[2] for t in triples]
+embed_dim = 200  
+state = torch.load("text8_cbow_embeddings.pth", map_location='cpu')  # Shape: [vocab_size, embed_dim]
+embeddings = state["embeddings.weight"] 
 
-# Flatten the lists of lists to a single list of strings
-rel_doc_texts_flat = [doc for docs in rel_doc_texts for doc in docs]
-irrel_doc_texts_flat = [doc for docs in irrel_doc_texts for doc in docs]
+assert embeddings.shape[0] == vocab_size, "Vocab size mismatch!"
 
-query_embeds, query_lens         = tokenize_and_embed(query_texts, batch_size=64)
-rel_doc_embeds, rel_doc_lens     = tokenize_and_embed(rel_doc_texts_flat, batch_size=64)
-irrel_doc_embeds, irrel_doc_lens = tokenize_and_embed(irrel_doc_texts_flat, batch_size=64)
+# -------------------------------
+# 2. Load triples from files
+# -------------------------------
 
-# Save embeddings to files
-with open("query_embeds.pkl", "wb") as f:
-    pickle.dump((query_embeds, query_lens), f)
-with open("rel_doc_embeds.pkl", "wb") as f:
-    pickle.dump((rel_doc_embeds, rel_doc_lens), f)
-with open("irrel_doc_embeds.pkl", "wb") as f:
-    pickle.dump((irrel_doc_embeds, irrel_doc_lens), f)
+# Load triples
+with open("triples_full.pkl", "rb") as f:
+    triples = pickle.load(f)
 
-# # Load embeddings from files
-# with open("query_embeds.pkl", "rb") as f:
-#     query_embeds, query_lens = pickle.load(f)
-# with open("rel_doc_embeds.pkl", "rb") as f:
-#     rel_doc_embeds, rel_doc_lens = pickle.load(f)
-# with open("irrel_doc_embeds.pkl", "rb") as f:
-#     irrel_doc_embeds, irrel_doc_lens = pickle.load(f)
+# -------------------------------
+# 3. Tokenize triples
+# -------------------------------
+
+def preprocess(text):
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9 ]+', '', text)
+    return text.split()
+
+tokenized_triples = []
+for query, rel_docs, irrel_docs in tqdm(triples, desc="Tokenizing triples"):
+    tokenized_query = preprocess(query)
+    tokenized_rels = [preprocess(doc) for doc in rel_docs]
+    tokenized_irrels = [preprocess(doc) for doc in irrel_docs]
+    tokenized_triples.append((tokenized_query, tokenized_rels, tokenized_irrels))
+
+# -----------------------------
+# 4. CBOW Model
+# -----------------------------
+class CBOW(nn.Module):
+    def __init__(self, vocab_size, embed_dim):
+        super().__init__()
+        self.embeddings = nn.Embedding(vocab_size, embed_dim)
+        self.linear = nn.Linear(embed_dim, vocab_size)
+
+    def forward(self, inputs):
+        embeds = self.embeddings(inputs).mean(dim=1)
+        return self.linear(embeds)
+
+cbow_model = CBOW(vocab_size, embed_dim)
+cbow_model.embeddings.weight.data.copy_(embeddings)
+cbow_model.embeddings.weight.requires_grad = False 
+cbow_model = cbow_model.to(device)
+
+
+# -------------------------------
+# 5. Embed queries, rel and irrel documents using pre-trained CBOW model
+# -------------------------------
+
+num_docs = 10  # number of relevant/irrelevant docs you expect per triple
+batch_size = 512  # adjust to taste; big enough to speed up, small enough to never threaten RAM
+
+query_embeddings = []
+relevant_doc_embeddings = []
+irrelevant_doc_embeddings = []
+
+def process_and_save_embeddings(
+    tokenized_triples, word_to_ix, cbow_model, 
+    query_embeds_path, rel_doc_embeds_path, irrel_doc_embeds_path,
+    batch_size=batch_size, num_docs=num_docs
+):
+    query_embeds_batch = []
+    rel_doc_embeds_batch = []
+    irrel_doc_embeds_batch = []
+    
+    for i, (tokenized_query, tokenized_rels, tokenized_irrels) in enumerate(
+        tqdm(tokenized_triples, desc="CBOW embedding + streaming", total=len(tokenized_triples))
+    ):
+        # Query: embeddings per token
+        q_ids = [word_to_ix[t] for t in tokenized_query if t in word_to_ix]
+        if q_ids:
+            with torch.no_grad():
+                q_vecs = cbow_model.embeddings(torch.tensor(q_ids))
+            query_embeds_batch.append(q_vecs)  # shape: [query_len, embed_dim]
+        else:
+            query_embeds_batch.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
+        
+        # Relevant docs: list of (doc_len, embed_dim)
+        rel_embs = []
+        for doc_tokens in tokenized_rels[:num_docs]:
+            doc_ids = [word_to_ix[t] for t in doc_tokens if t in word_to_ix]
+            if doc_ids:
+                with torch.no_grad():
+                    doc_vecs = cbow_model.embeddings(torch.tensor(doc_ids))
+                rel_embs.append(doc_vecs)
+            else:
+                rel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
+        while len(rel_embs) < num_docs:
+            rel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
+        rel_doc_embeds_batch.append(rel_embs)
+
+        # Irrelevant docs: list of (doc_len, embed_dim)
+        irrel_embs = []
+        for doc_tokens in tokenized_irrels[:num_docs]:
+            doc_ids = [word_to_ix[t] for t in doc_tokens if t in word_to_ix]
+            if doc_ids:
+                with torch.no_grad():
+                    doc_vecs = cbow_model.embeddings(torch.tensor(doc_ids))
+                irrel_embs.append(doc_vecs)
+            else:
+                irrel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))(0)
+        while len(irrel_embs) < num_docs:
+            irrel_embs.append(torch.zeros(1, cbow_model.embeddings.embedding_dim))
+        irrel_doc_embeds_batch.append(irrel_embs)
+
+        # Save every batch_size triples
+        if (i + 1) % batch_size == 0 or (i + 1) == len(tokenized_triples):
+            # Save as batch-lists (not stacked), because sequences are ragged
+            with open(query_embeds_path, 'ab') as fq:
+                pickle.dump(query_embeds_batch, fq)
+            with open(rel_doc_embeds_path, 'ab') as fr:
+                pickle.dump(rel_doc_embeds_batch, fr)
+            with open(irrel_doc_embeds_path, 'ab') as fi:
+                pickle.dump(irrel_doc_embeds_batch, fi)
+
+            # Free RAM
+            query_embeds_batch.clear()
+            rel_doc_embeds_batch.clear()
+            irrel_doc_embeds_batch.clear()
+
+
+# Usage:
+process_and_save_embeddings(
+    tokenized_triples, word_to_ix, cbow_model,
+    "query_embeds.pkl", "rel_doc_embeds.pkl", "irrel_doc_embeds.pkl",
+    batch_size=512, num_docs=10
+)
 
 
 # -----------------------------
-# 3. Define distance functions & Triplet loss function
+# 6. Load Embeddings
+# -----------------------------
+
+def load_all_batches(path):
+    all_data = []
+    with open(path, "rb") as f:
+        while True:
+            try:
+                batch = pickle.load(f)
+                all_data.extend(batch)  # for lists of tensors, this flattens batches
+            except EOFError:
+                break
+    return all_data
+
+# Load them all
+query_embeds = load_all_batches("query_embeds.pkl")           # list of [query_len, embed_dim] tensors
+rel_doc_embeds = load_all_batches("rel_doc_embeds.pkl")       # list of lists: each is [num_docs] of [doc_len, embed_dim] tensors
+irrel_doc_embeds = load_all_batches("irrel_doc_embeds.pkl")
+
+
+# -----------------------------
+# 7. Define distance functions & Triplet loss function
 # -----------------------------
 
 # Cosine similarity for calculation of cosine distance
 def cosine_similarity(x, y):
     return F.cosine_similarity(x, y, dim=1)
 
-# Cosine - Smallest value means most similar
-def cosine_distance(x, y):
-    return 1 - cosine_similarity(x, y)
-
-# Euclidean (L2) - Smallest value means most similar
-def euclidean_distance(x, y):
-    return torch.norm(x - y, p=2, dim=1)
-
-# Squared Euclidean - Smallest value means most similar
-def squared_euclidean_distance(x, y):
-    return torch.sum((x - y) ** 2, dim=1)
-
-# Manhattan (L1) - Smallest value means most similar
-def manhattan_distance(x, y):
-    return torch.norm(x - y, p=1, dim=1)
-
-# Chebyshev (L-infinity) - Smallest value means most similar
-def chebyshev_distance(x, y):
-    return torch.max(torch.abs(x - y), dim=1).values
-
-# Minkowski - Smallest value means most similar
-def minkowski_distance(x, y, p=3):
-    return torch.norm(x - y, p=p, dim=1)
 
 # Triplet loss function - will compute the loss for a batch of triplets
 def triplet_loss_function(query, relevant_doc, irrelevant_doc, distance_function, margin):
@@ -149,7 +196,7 @@ def triplet_loss_function(query, relevant_doc, irrelevant_doc, distance_function
 
 
 # -----------------------------
-# 4. Define Two Tower Model (QueryTower and DocTower)
+# 8. Define Two Tower Model (QueryTower and DocTower)
 # -----------------------------
 
 class QueryTower(nn.Module):
@@ -189,7 +236,7 @@ class DocTower(nn.Module):
 
 
 # -----------------------------
-# 5. Prepare dataset for DataLoader
+# 9. Prepare dataset for DataLoader
 # -----------------------------
 
 class TripleDataset(Dataset):
@@ -224,27 +271,88 @@ def collate_fn(batch):
 
 
 # Create the dataset and dataloader for batching
-batch_size = 32
+batch_size = 64
 dataset = TripleDataset(query_embeds, rel_doc_embeds, irrel_doc_embeds)
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, pin_memory=True)
 
 
 # -----------------------------
-# 6. Train the model (change hyperparameters as needed)
+# 10. Create evaluation for the model using Recall@K
 # -----------------------------
 
-# embed_dim defined in section 3.
+def evaluate_model(qry_tower, doc_tower, val_data, distance_fn, K=1, device="gpu"):
+    qry_tower.eval()
+    doc_tower.eval()
+    num_correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for q_embed, rel_embeds, irrel_embeds in val_data:
+            # q_embed: (q_seq_len, embed_dim)
+            # rel_embeds: list of (d_seq_len, embed_dim) [just 1, or list if more]
+            # irrel_embeds: list of (d_seq_len, embed_dim)
+            q_embed = q_embed.to(device)
+            rel_embeds = rel_embeds.to(device)
+            irrel_embeds = irrel_embeds.to(device)
+            # Stack all candidate docs: relevant + irrelevants
+            candidates = [rel_embeds] + list(irrel_embeds)
+            all_doc_tensors = [doc.to(device) for doc in candidates]
+            doc_lens = [doc.shape[0] for doc in all_doc_tensors]
+            padded_docs = torch.nn.utils.rnn.pad_sequence(all_doc_tensors, batch_first=True)
+            
+            # Encode query
+            q_input = q_embed.unsqueeze(0).to(device)              # (1, q_seq_len, embed_dim)
+            q_len = [q_embed.shape[0]]
+            q_vec = QueryTower(q_input, q_len)                     # (1, hidden_dim)
+            
+            # Encode all docs in batch
+            d_vecs = DocTower(padded_docs, doc_lens)               # (num_candidates, hidden_dim)
+
+            # Compute distances (query vs. all docs)
+            dists = distance_fn(q_vec.repeat(len(doc_lens), 1), d_vecs)  # (num_candidates,)
+            sorted_indices = torch.argsort(dists)  # Smallest = most similar
+
+            # Recall@K: Is the relevant doc (index 0) in top K?
+            if 0 in sorted_indices[:K]:
+                num_correct += 1
+            total += 1
+
+    recall_at_k = num_correct / total
+    return recall_at_k
+
+
+# -----------------------------
+# 11. Load validation data embeddings
+# -----------------------------
+
+# Load them all
+query_embeds_val = load_all_batches("query_embeds_val.pkl")           # list of [query_len, embed_dim] tensors
+rel_doc_embeds_val = load_all_batches("rel_doc_embeds_val.pkl")       # list of lists: each is [num_docs] of [doc_len, embed_dim] tensors
+irrel_doc_embeds_val = load_all_batches("irrel_doc_embeds_val.pkl")
+
+val_data = []
+# Ensure lengths match (or handle indexing errors)
+for i in range(len(query_embeds_val)):
+    q_embed = query_embeds_val[i]                       # [q_len, embed_dim]
+    rel_embed = rel_doc_embeds_val[i][0]                # [rel_len, embed_dim]; use the first relevant doc
+    irrel_embed = irrel_doc_embeds_val[i][0]            # [irrel_len, embed_dim]; use the first irrelevant doc
+    val_data.append((q_embed, rel_embed, [irrel_embed])) 
+
+
+# -----------------------------
+# 12. Train the model
+# -----------------------------
 
 # Define hyperparameters
-hidden_dim = 128  # Dimension of the hidden state in RNNs (GRU/LSTM - can be adjusted)
-margin = 0.2  # Margin for triplet loss (can be adjusted)
-distance_function = cosine_distance  # Choose distance function (cosine_distance, euclidean_distance, manhattan_distance, squared_euclidean_distance, chebyshev_distance, minkowski_distance)
+hidden_dim = 128
+margin = 0.2
+distance_function = cosine_similarity
 
-qry_tower = QueryTower(embed_dim, hidden_dim)
-doc_tower = DocTower(embed_dim, hidden_dim)
+qry_tower = QueryTower(embed_dim, hidden_dim, num_layers=1, rnn_type='gru').to(device)
+doc_tower = DocTower(embed_dim, hidden_dim, num_layers=1, rnn_type='gru').to(device)
 
 optimizer = torch.optim.Adam(list(qry_tower.parameters()) + list(doc_tower.parameters()), lr=1e-3)
-num_epochs = 5  # Set as needed
+num_epochs = 10
 
 for epoch in range(num_epochs):
     epoch_loss = 0.0
@@ -253,7 +361,10 @@ for epoch in range(num_epochs):
         # qry_embeds: (batch, q_seq_len, embed_dim)
         # rel_embeds: (batch, r_seq_len, embed_dim)
         # irrel_embeds: (batch, i_seq_len, embed_dim)
-
+        qry_embeds = qry_embeds.to(device)
+        rel_embeds = rel_embeds.to(device)
+        irrel_embeds = irrel_embeds.to(device)
+        
         # Mask: keep items where rel doc is *not* all zeros
         # mask shape: (batch,)
         mask = ~torch.all(rel_embeds == 0, dim=(1,2))
@@ -287,6 +398,9 @@ for epoch in range(num_epochs):
         epoch_loss += loss.item()
 
     print(f"Epoch {epoch+1}/{num_epochs} | Loss: {epoch_loss / len(dataloader):.4f}")
+    if (epoch + 1) % 2 == 0:
+        recall = evaluate_model(qry_tower, doc_tower, val_data, cosine_distance, K=1)
+        print(f"Recall@1: {recall:.4f}")
 
 
 # Save final model after all epochs are done
@@ -296,4 +410,4 @@ torch.save({
     'doc_tower_state_dict': doc_tower.state_dict(),
     'optimizer_state_dict': optimizer.state_dict(),
     'loss': epoch_loss,  # from last epoch
-}, "twotower_final.pt")
+}, "two_tower_full_final.pt")
