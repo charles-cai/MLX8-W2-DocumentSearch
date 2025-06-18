@@ -496,12 +496,10 @@ for epoch in range(num_epochs):
         recall = evaluate_model(qry_tower, doc_tower, val_data, cosine_similarity, K=1)
         print(f"Recall@1: {recall:.4f}")
 
-
-# Save final model after all epochs are done
-torch.save({
-    'epoch': num_epochs,
-    'qry_tower_state_dict': qry_tower.state_dict(),
-    'doc_tower_state_dict': doc_tower.state_dict(),
-    'optimizer_state_dict': optimizer.state_dict(),
-    'loss': epoch_loss,  # from last epoch
-}, "two_tower_final.pt")
+    torch.save({
+        'epoch': epoch + 1,
+        'qry_tower_state_dict': qry_tower.state_dict(),
+        'doc_tower_state_dict': doc_tower.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss': epoch_loss,  # for this epoch
+    }, f"two_tower_epoch_{epoch+1}.pt")
