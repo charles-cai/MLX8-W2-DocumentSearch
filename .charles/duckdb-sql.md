@@ -53,9 +53,16 @@ SELECT passages -> '$.is_selected' FROM 'hf://datasets/microsoft/ms_marco/v1.1/t
 ## Local Parquet files
 
 ```sql
+SELECT * FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 10;
+
 SELECT * FROM '.data/ms_marco_v1.1/test.parquet' LIMIT 10;
 
-SELECT * FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 10;
+SELECT * FROM '.data/ms_marco_v1.1/validation.parquet' LIMIT 10;
+
+DESCRIBE '.data/ms_marco_v1.1/train.parquet';
+DESCRIBE '.data/ms_marco_v1.1/test.parquet';
+DESCRIBE '.data/ms_marco_v1.1/validation.parquet';
+
 
 SELECT COUNT(*) FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 10;
 
@@ -101,4 +108,11 @@ SELECT COUNT(*) FROM '.data/processed/train_triples.parquet' LIMIT 10;
 -- │ 102128 │ 19699 │    82326     │ 82430 │
 -- └────────┴───────┴──────────────┴───────┘
 --
+
+SELECT * FROM '.data/processed/train_triples_embeddings.parquet' LIMIT 10;
+
+SELECT COUNT(*) FROM '.data/processed/train_triples_embeddings.parquet' LIMIT 10;
+
+DESCRIBE '.data/processed/train_triples_embeddings.parquet';
+
 ```
