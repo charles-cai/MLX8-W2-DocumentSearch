@@ -1,8 +1,6 @@
 import os
-import warnings
 import sys
 import argparse
-import json
 import pandas as pd
 from datasets import load_dataset
 import numpy as np
@@ -199,6 +197,54 @@ class DataProcessing:
         self.logger.info("Completed def_randomize_negative_query_id")
         return df
 
+def store_embeddings(w2v_utils):
+    """
+    Compute and store embeddings for query, positive_doc, and negative_doc columns.
+    Uses environment variables for input/output paths.
+    """
+
+    # Use environment variables for paths
+    mlx_dataset_output_dir = os.getenv("MLX_DATASET_OUTPUT_DIR", ".data/processed")
+    triple_split = os.getenv("MLX_DATASET_TRIPLE_SPLIT", "train")
+    triples_path = os.path.join(mlx_dataset_output_dir, f"{triple_split}_triples.parquet")
+    output_path = os.path.join(mlx_dataset_output_dir, f"{triple_split}_triples_embeddings.parquet")
+
+    logger = w2v_utils.logger
+    logger.info(f"Loading triples from {triples_path}")
+    df = pd.read_parquet(triples_path)
+    logger.info(f"Loaded {len(df)} triples")
+
+    # Ensure Word2Vec model is loaded
+    if w2v_utils.w2v_model is None:
+        logger.info("Word2Vec model not loaded, loading now...")
+        w2v_utils.load_word2vec()
+
+    # Compute embeddings for each row with tqdm progress bar
+    logger.info("Computing embeddings for query, positive_doc, and negative_doc...")
+    query_embs = []
+    pos_embs = []
+    neg_embs = []
+
+    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Embedding rows"):
+        query_embs.append(w2v_utils.embedding(row["query"]))
+        pos_embs.append(w2v_utils.embedding(row["positive_doc"]))
+        neg_embs.append(w2v_utils.embedding(row["negative_doc"]))
+
+    # Convert to numpy arrays
+    query_embs = np.stack(query_embs)
+    pos_embs = np.stack(pos_embs)
+    neg_embs = np.stack(neg_embs)
+
+    # Add new columns to DataFrame
+    df["query_emb"] = list(query_embs)
+    df["positive_doc_emb"] = list(pos_embs)
+    df["negative_doc_emb"] = list(neg_embs)
+
+    logger.info(f"Saving embeddings to {output_path}")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    df.to_parquet(output_path, index=False)
+    logger.success(f"Stored embeddings for {len(df)} triples at {output_path}")
+
 @with_exception_logging
 def main():
     
@@ -206,12 +252,17 @@ def main():
     parser.add_argument(
         "--download", 
         action="store_true", 
-        help="Download and save datasets to local storage"
+        help="Step 1: Download and save datasets to local storage"
     )
     parser.add_argument(
         "--gen-triples", 
         action="store_true", 
-        help="Generate training triples from parquet files"
+        help="Step 2: Generate training triples from parquet files"
+    )
+    parser.add_argument(
+        "--embedding",
+        action="store_true",
+        help="Step 3: Generate and store embeddings for triples"
     )
     args = parser.parse_args()
     
@@ -247,9 +298,16 @@ def main():
             triples_df = dp.gen_triples(triple_split)
             logger.info(f"Generated {len(triples_df)} triples for {triple_split} split")
             logger.success("Triple generation completed successfully!")
-        
-        if not args.download and not args.gen_triples:
-            logger.info("No action flags provided. Use --download to download datasets or --gen-triples to generate triples.")
+
+        if args.embedding:
+            logger.info("Embedding flag detected, generating and storing embeddings for triples...")
+            from word2vec_utils import Word2vecUtils
+            w2v_utils = Word2vecUtils()
+            store_embeddings(w2v_utils)
+            logger.success("Embeddings generated and stored successfully!")
+
+        if not args.download and not args.gen_triples and not args.embedding:
+            logger.info("No action flags provided. Use --download to download datasets, --gen-triples to generate triples, or --embedding to generate embeddings.")
         
     except Exception as e:
         logger.error(f"Processing failed: {e}")

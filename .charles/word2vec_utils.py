@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from gensim.models import KeyedVectors
 import os
+import pandas as pd
 
 # Add import for downloader
 import gensim.downloader as api
@@ -21,46 +22,50 @@ class Word2vecUtils:
     
     def __init__(self):
         self.logger = setup_logging(__name__)
-        
-        self.gensim_cache_dir = os.getenv("GENSIM_CACHE_DIR", "./.data/gensim")
-        self.word2vec_model_name = os.getenv("GENSIM_WORD2VEC_MODEL", "GoogleNews-vectors-negative300.bin")
-        self.normalize_case = os.getenv("GENSIM_NORMALIZE_CASE", "true").lower() == "true"
-        
+
+        # Use uppercase for environment variable names and local variables
+        self.GENSIM_CACHE_DIR = os.getenv("GENSIM_CACHE_DIR", "./.data/gensim")
+        self.GENSIM_WORD2VEC_MODEL = os.getenv("GENSIM_WORD2VEC_MODEL", "GoogleNews-vectors-negative300.bin")
+        self.GENSIM_NORMALIZE_CASE = os.getenv("GENSIM_NORMALIZE_CASE", "true").lower() == "true"
+
+        # Set W2V_PATH as uppercase and initialize here
+        self.W2V_PATH = os.path.join(self.GENSIM_CACHE_DIR, self.GENSIM_WORD2VEC_MODEL)
+
+        # Print out key environment variables and their values
+        self.logger.info(f"GENSIM_CACHE_DIR: {self.GENSIM_CACHE_DIR}")
+        self.logger.info(f"GENSIM_WORD2VEC_MODEL: {self.GENSIM_WORD2VEC_MODEL}")
+        self.logger.info(f"GENSIM_NORMALIZE_CASE: {self.GENSIM_NORMALIZE_CASE}")
+        self.logger.info(f"W2V_PATH: {self.W2V_PATH}")
+
         self.w2v_model = None
         self.vocab = None
         self.vocab_size = None
         self.emb_dim = None
     
-    def load_word2vec(self, w2v_path=None, freeze=True):
+    def load_word2vec(self, freeze=True):
         """
         Load pre-trained Word2Vec model and build embedding matrix.
         
         Args:
-            w2v_path: Path to Word2Vec model file (if None, uses GENSIM_CACHE_DIR + GENSIM_WORD2VEC_MODEL)
             freeze: Whether to freeze the embedding weights during training
         
         Returns:
             tuple: (embedding_layer, vocab_dict, vocab_size, embedding_dim)
         """
-        if w2v_path is None:
-            w2v_path = os.path.join(self.gensim_cache_dir, self.word2vec_model_name)
-             
-        # Download model if not exists
-        if not os.path.exists(w2v_path):
-            os.makedirs(self.gensim_cache_dir, exist_ok=True)
+        # Use self.W2V_PATH instead of local w2v_path
+        if not os.path.exists(self.W2V_PATH):
+            os.makedirs(self.GENSIM_CACHE_DIR, exist_ok=True)
 
-            self.logger.warning(f"Word2Vec model not found at {w2v_path}. Downloading 'word2vec-google-news-300' via gensim.downloader...")
-            # Download using gensim downloader
+            self.logger.warning(f"Word2Vec model not found at {self.W2V_PATH}. Downloading 'word2vec-google-news-300' via gensim.downloader...")
             model = api.load("word2vec-google-news-300")
-            # Save in binary format to the expected path
-            model.save_word2vec_format(w2v_path, binary=True)
-            self.logger.info(f"Downloaded and saved Word2Vec model to {w2v_path}")
+            model.save_word2vec_format(self.W2V_PATH, binary=True)
+            self.logger.info(f"Downloaded and saved Word2Vec model to {self.W2V_PATH}")
 
-        self.logger.info(f"Loading Word2Vec model from: {w2v_path}")
-        self.logger.info(f"Using cache directory: {self.gensim_cache_dir}")
+        self.logger.info(f"Loading Word2Vec model from: {self.W2V_PATH}")
+        self.logger.info(f"Using cache directory: {self.GENSIM_CACHE_DIR}")
         
         # Load pre-trained Word2Vec
-        self.w2v_model = KeyedVectors.load_word2vec_format(w2v_path, binary=True)
+        self.w2v_model = KeyedVectors.load_word2vec_format(self.W2V_PATH, binary=True)
         
         self.vocab = self.w2v_model.key_to_index  # word -> idx
         self.vocab_size = len(self.vocab)
@@ -84,8 +89,7 @@ class Word2vecUtils:
         
         self.logger.success(f"Embedding layer created with freeze={freeze}")
         return embedding, self.vocab, self.vocab_size, self.emb_dim
-      
-    
+
     def embedding(self, text):
         """
         Calculate average embedding for a given text string.
@@ -104,14 +108,12 @@ class Word2vecUtils:
             self.logger.warning("Empty text provided, returning zero vector")
             return np.zeros(self.emb_dim, dtype=np.float32)
         
-        # Apply case normalization based on configuration
         processed_text = text.strip()
-        if self.normalize_case:
+        if self.GENSIM_NORMALIZE_CASE:
             processed_text = processed_text.lower()
         
-        # Use gensim's simple_preprocess for tokenization and normalization
         words = simple_preprocess(processed_text, deacc=True)  # deacc=True removes accents
-        self.logger.debug(f"Processing text with {len(words)} words (normalize_case={self.normalize_case}): {words[:5]}...")
+        self.logger.debug(f"Processing text with {len(words)} words (normalize_case={self.GENSIM_NORMALIZE_CASE}): {words[:5]}...")
         
         # Collect embeddings for words that exist in vocabulary
         embeddings = []
@@ -134,12 +136,12 @@ class Word2vecUtils:
         return avg_embedding
     
     @staticmethod
-    def load_word2vec_static(w2v_path='GoogleNews-vectors-negative300.bin', freeze=True):
+    def load_word2vec_static(freeze=True):
         """
         Static method for backward compatibility.
         """
         utils = Word2vecUtils()
-        return utils.load_word2vec(w2v_path, freeze)
+        return utils.load_word2vec(freeze)
     
 def main():
     """
@@ -151,10 +153,6 @@ def main():
     try:
         # Initialize Word2vecUtils
         w2v_utils = Word2vecUtils()
-        logger.info(f"Initialized Word2vecUtils with:")
-        logger.info(f"  - Cache directory: {w2v_utils.gensim_cache_dir}")
-        logger.info(f"  - Model name: {w2v_utils.word2vec_model_name}")
-        logger.info(f"  - Normalize case: {w2v_utils.normalize_case}")
         
         # Test loading Word2Vec model
         logger.info("Testing Word2Vec model loading...")
@@ -192,7 +190,7 @@ def main():
                 logger.info(f"Word '{word}' found in vocabulary (index: {vocab[word.lower()]})")
             else:
                 logger.warning(f"Word '{word}' not found in vocabulary")
-        
+                    
         logger.success("All Word2vecUtils tests completed successfully!")
         
     except Exception as e:
