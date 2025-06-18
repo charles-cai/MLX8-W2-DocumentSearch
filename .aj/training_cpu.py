@@ -16,58 +16,58 @@ from tqdm import tqdm
 # -----------------------------
 # 1. Load Vocabulary & Pre-trained Embeddings
 # -----------------------------
-with open("vocab_new.json", "r", encoding="utf-8") as f:
-    word_to_ix = json.load(f)
+# with open("vocab_new.json", "r", encoding="utf-8") as f:
+#     word_to_ix = json.load(f)
 
-ix_to_word = {int(i): w for w, i in word_to_ix.items()}
-vocab_size = len(word_to_ix)
+# ix_to_word = {int(i): w for w, i in word_to_ix.items()}
+# vocab_size = len(word_to_ix)
 
-embed_dim = 200  
-state = torch.load("text8_cbow_embeddings.pth", map_location='cpu')  # Shape: [vocab_size, embed_dim]
-embeddings = state["embeddings.weight"] 
+# embed_dim = 200  
+# state = torch.load("text8_cbow_embeddings.pth", map_location='cpu')  # Shape: [vocab_size, embed_dim]
+# embeddings = state["embeddings.weight"] 
 
-assert embeddings.shape[0] == vocab_size, "Vocab size mismatch!"
+# assert embeddings.shape[0] == vocab_size, "Vocab size mismatch!"
 
 # -------------------------------
 # 2. Load triples from files
 # -------------------------------
 
 # Load triples
-with open("triples_full.pkl", "rb") as f:
-    triples = pickle.load(f)
+# with open("triples_full.pkl", "rb") as f:
+#     triples = pickle.load(f)
 
-# -------------------------------
-# 3. Tokenize triples
-# -------------------------------
+# # -------------------------------
+# # 3. Tokenize triples
+# # -------------------------------
 
-def preprocess(text):
-    text = text.lower()
-    text = re.sub(r'[^a-z0-9 ]+', '', text)
-    return text.split()
+# def preprocess(text):
+#     text = text.lower()
+#     text = re.sub(r'[^a-z0-9 ]+', '', text)
+#     return text.split()
 
-tokenized_triples = []
-for query, rel_docs, irrel_docs in tqdm(triples, desc="Tokenizing triples"):
-    tokenized_query = preprocess(query)
-    tokenized_rels = [preprocess(doc) for doc in rel_docs]
-    tokenized_irrels = [preprocess(doc) for doc in irrel_docs]
-    tokenized_triples.append((tokenized_query, tokenized_rels, tokenized_irrels))
+# tokenized_triples = []
+# for query, rel_docs, irrel_docs in tqdm(triples, desc="Tokenizing triples"):
+#     tokenized_query = preprocess(query)
+#     tokenized_rels = [preprocess(doc) for doc in rel_docs]
+#     tokenized_irrels = [preprocess(doc) for doc in irrel_docs]
+#     tokenized_triples.append((tokenized_query, tokenized_rels, tokenized_irrels))
 
 # -----------------------------
 # 4. CBOW Model
 # -----------------------------
-class CBOW(nn.Module):
-    def __init__(self, vocab_size, embed_dim):
-        super().__init__()
-        self.embeddings = nn.Embedding(vocab_size, embed_dim)
-        self.linear = nn.Linear(embed_dim, vocab_size)
+# class CBOW(nn.Module):
+#     def __init__(self, vocab_size, embed_dim):
+#         super().__init__()
+#         self.embeddings = nn.Embedding(vocab_size, embed_dim)
+#         self.linear = nn.Linear(embed_dim, vocab_size)
 
-    def forward(self, inputs):
-        embeds = self.embeddings(inputs).mean(dim=1)
-        return self.linear(embeds)
+#     def forward(self, inputs):
+#         embeds = self.embeddings(inputs).mean(dim=1)
+#         return self.linear(embeds)
 
-cbow_model = CBOW(vocab_size, embed_dim)
-cbow_model.embeddings.weight.data.copy_(embeddings)
-cbow_model.embeddings.weight.requires_grad = False 
+# cbow_model = CBOW(vocab_size, embed_dim)
+# cbow_model.embeddings.weight.data.copy_(embeddings)
+# cbow_model.embeddings.weight.requires_grad = False 
 
 
 # -------------------------------
