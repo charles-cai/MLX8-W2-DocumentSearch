@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: data-processing",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/.charles/data_processing.py",
+            "pythonPath": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}/.charles",
+            "console": "integratedTerminal",
+            "args": ["--download"]
+        }
+    ]
+}

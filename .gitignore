@@ -198,7 +198,7 @@ __MACOSX/
 wandb/
 .data/*
 !.data/.gitkeep
-.vscode/
+
 
 # Python cache and compiled files
 __pycache__/

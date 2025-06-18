@@ -215,6 +215,11 @@ def main():
     )
     args = parser.parse_args()
     
+    # Show help and exit if no arguments are provided
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+    
     logger = setup_logging(__name__)
     logger.info("Starting MS MARCO dataset processing...")
     

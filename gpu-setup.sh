@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # git clone https://github.com/charles-cai/MLX8-W2-DocumentSearch.git
-# cd MLX8-W2-DocumentSearch.git
+# cd MLX8-W2-DocumentSearch
 
 apt update
 apt install -y vim rsync git git-lfs nvtop htop tmux curl btop
@@ -50,3 +50,5 @@ echo "Run 'git lfs pull' to download large files."
 
 which python
 which uv
+
+echo "Please don't forget to copy .env.example to .env in your work folder, and add API Keys"
