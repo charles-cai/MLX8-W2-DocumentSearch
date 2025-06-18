@@ -20,6 +20,15 @@ from tqdm import tqdm
 import random
 from typing import Dict, List, Tuple
 import json
+import re
+from gensim.utils import simple_preprocess
+
+def clean_text(text):
+    """Clean and preprocess text (same as CBOW training)."""
+    # Remove special characters and normalize whitespace
+    text = re.sub(r'[^\w\s]', '', text.lower())
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 class TwoTowerModel(nn.Module):
     """
@@ -95,7 +104,7 @@ class TwoTowerModel(nn.Module):
     
     def tokenize(self, text: str, max_len: int = 128) -> torch.Tensor:
         """
-        Tokenize text using the vocabulary.
+        Tokenize text using the same preprocessing as CBOW training.
         
         Args:
             text: Input text
@@ -104,10 +113,33 @@ class TwoTowerModel(nn.Module):
         Returns:
             Token IDs tensor
         """
-        # Simple tokenization (same as training)
-        tokens = text.lower().split()
-        token_ids = [self.word_to_index.get(tok, self.word_to_index.get("<unk>", 0)) 
+        # Handle None or empty text
+        if not text or not text.strip():
+            # Return a tensor with at least one non-zero token (unknown token)
+            token_ids = [self.word_to_index.get("<unk>", 1)]  # Use 1 instead of 0 for unknown
+            token_ids += [0] * (max_len - len(token_ids))
+            return torch.tensor(token_ids, dtype=torch.long)
+        
+        # Use the SAME preprocessing as CBOW training
+        cleaned_text = clean_text(text)
+        
+        if not cleaned_text:
+            # If cleaning results in empty text, use unknown token
+            tokens = ["<unk>"]
+        else:
+            # Use Gensim's simple_preprocess (same as CBOW training)
+            tokens = simple_preprocess(cleaned_text)
+        
+        # If no tokens after preprocessing, add unknown token
+        if not tokens:
+            tokens = ["<unk>"]
+        
+        token_ids = [self.word_to_index.get(tok, self.word_to_index.get("<unk>", 1)) 
                     for tok in tokens]
+        
+        # Ensure we have at least one non-zero token
+        if all(tid == 0 for tid in token_ids):
+            token_ids[0] = self.word_to_index.get("<unk>", 1)
         
         # Truncate or pad
         token_ids = token_ids[:max_len]
@@ -131,6 +163,9 @@ class TwoTowerModel(nn.Module):
         
         # Calculate actual sequence lengths (for packing)
         seq_lengths = (token_ids != 0).sum(dim=1).cpu()  # [batch_size]
+        
+        # Handle empty sequences - ensure minimum length of 1
+        seq_lengths = torch.clamp(seq_lengths, min=1)
         
         # Pack padded sequences for efficient RNN processing
         packed_embeddings = nn.utils.rnn.pack_padded_sequence(
