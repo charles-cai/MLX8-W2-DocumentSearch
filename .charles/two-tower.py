@@ -2,42 +2,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from gensim.models import KeyedVectors
 
-def load_word2vec(w2v_path='GoogleNews-vectors-negative300.bin', freeze=True):
-    """
-    Load pre-trained Word2Vec model and build embedding matrix.
-    
-    Args:
-        w2v_path: Path to Word2Vec model file
-        freeze: Whether to freeze the embedding weights during training
-    
-    Returns:
-        tuple: (embedding_layer, vocab_dict, vocab_size, embedding_dim)
-    """
-    # Load pre-trained Word2Vec
-    w2v = KeyedVectors.load_word2vec_format(w2v_path, binary=True)
-    
-    vocab = w2v.key_to_index  # word -> idx
-    vocab_size = len(vocab)
-    emb_dim = w2v.vector_size  # 300
-    
-    # Build embedding weight tensor (words not in w2v get zero vector)
-    weight = np.zeros((vocab_size, emb_dim), dtype=np.float32)
-    for word, idx in vocab.items():
-        weight[idx] = w2v[word]
-        
-    # PyTorch embedding layer
-    embedding = nn.Embedding.from_pretrained(
-        torch.from_numpy(weight), 
-        freeze=freeze
-    )
-    
-    return embedding, vocab, vocab_size, emb_dim
+from word2vec_utils import Word2vecUtils
 
 # 2) Two-Tower RNN model
 class TwoTowerRNN(nn.Module):
-    def __init__(self, emb_layer, hidden_dim=256, num_layers=1, bidirectional=True, dropout=0.2):
+    def __init__(self, emb_layer, emb_dim, hidden_dim=256, num_layers=1, bidirectional=True, dropout=0.2):
         super().__init__()
         self.emb = emb_layer
         self.rnn_q = nn.LSTM(
@@ -97,17 +67,23 @@ class TwoTowerRNN(nn.Module):
 
 # 3) Dataset & CollateFn for (query, 10×pos, 10×neg)
 class TripletTextDataset(Dataset):
-    def __init__(self, queries, pos_docs, neg_docs, word2idx):
+    def __init__(self, queries, pos_docs, neg_docs, word2idx, normalize_case=True):
         assert len(queries) == len(pos_docs) == len(neg_docs)
         self.queries, self.pos_docs, self.neg_docs = queries, pos_docs, neg_docs
         self.w2i = word2idx
+        self.normalize_case = normalize_case
 
     def __len__(self):
         return len(self.queries)
 
     def text_to_ids(self, text):
-        # simple whitespace tokenize; map OOV→0
-        return torch.LongTensor([self.w2i.get(t, 0) for t in text.split()])
+        # Apply case normalization based on configuration
+        processed_text = text
+        if self.normalize_case:
+            processed_text = text.lower()
+        
+        # Tokenize and map OOV→0
+        return torch.LongTensor([self.w2i.get(t, 0) for t in processed_text.split()])
 
     def __getitem__(self, idx):
         q = self.text_to_ids(self.queries[idx])
@@ -198,17 +174,18 @@ def main():
     Main function to initialize model and run training.
     """
     # Load Word2Vec and initialize embedding
-    embedding, vocab, vocab_size, emb_dim = load_word2vec()
+    w2v_utils = Word2vecUtils()
+    embedding, vocab, vocab_size, emb_dim = w2v_utils.load_word2vec()
     
     # Initialize model and training components
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = TwoTowerRNN(embedding).to(device)
+    model = TwoTowerRNN(embedding, emb_dim).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
     margin = 1.0
     criterion = nn.MarginRankingLoss(margin=margin)
 
     # assume lists: queries, pos_docs, neg_docs already defined
-    ds = TripletTextDataset(queries, pos_docs, neg_docs, vocab)
+    ds = TripletTextDataset(queries, pos_docs, neg_docs, vocab, normalize_case=w2v_utils.normalize_case)
     loader = DataLoader(ds, batch_size=8, shuffle=True, collate_fn=collate_fn)
     
     # Run training

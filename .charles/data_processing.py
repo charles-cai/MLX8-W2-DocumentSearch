@@ -5,18 +5,19 @@ import argparse
 import json
 import pandas as pd
 from datasets import load_dataset
-from dotenv import load_dotenv
 import numpy as np
 from tqdm import tqdm
 
 from logging_utils import setup_logging, with_exception_logging
 
+from dotenv import load_dotenv
+load_dotenv()
+
 class DataProcessing:
     def __init__(self):
         self.logger = setup_logging(__name__)
         self.logger.info("Initializing DataProcessing...")
-        
-        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
         self.HF_DATASETS_CACHE = os.getenv("HF_DATASETS_CACHE")
         self.HF_TOKEN = os.getenv("HF_TOKEN")
         self.HF_ORGANIZATION = os.getenv("HF_ORGANIZATION")
@@ -106,11 +107,6 @@ class DataProcessing:
         df = pd.read_parquet(parquet_file_path)
         total_records = len(df)
         
-        # Ensure negative_query_id exists
-        if 'negative_query_id' not in df.columns:
-            self.logger.info("negative_query_id column not found, generating...")
-            df = self.add_negative_query_ids(split, df)
-
         self.logger.info(f"Processing {total_records} records to generate triples...")
         
         results = []
@@ -205,6 +201,7 @@ class DataProcessing:
 
 @with_exception_logging
 def main():
+    
     parser = argparse.ArgumentParser(description="MS MARCO dataset processing")
     parser.add_argument(
         "--download", 
