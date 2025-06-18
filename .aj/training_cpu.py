@@ -22,7 +22,7 @@ from tqdm import tqdm
 # ix_to_word = {int(i): w for w, i in word_to_ix.items()}
 # vocab_size = len(word_to_ix)
 
-# embed_dim = 200  
+embed_dim = 200  
 # state = torch.load("text8_cbow_embeddings.pth", map_location='cpu')  # Shape: [vocab_size, embed_dim]
 # embeddings = state["embeddings.weight"] 
 
