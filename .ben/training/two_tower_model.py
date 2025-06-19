@@ -431,7 +431,7 @@ def collate_fn(batch, model):
 
 class ContrastiveLoss(nn.Module):
     """
-    Contrastive loss for two-tower training.
+    Contrastive loss for two-tower training using InfoNCE approach.
     """
     
     def __init__(self, temperature: float = 0.1):
@@ -464,6 +464,88 @@ class ContrastiveLoss(nn.Module):
         # Compute accuracy
         predictions = torch.argmax(logits, dim=1)
         accuracy = (predictions == labels).float().mean()
+        
+        return loss, accuracy
+
+class MarginContrastiveLoss(nn.Module):
+    """
+    Traditional margin-based contrastive loss for two-tower training.
+    
+    Loss = max(0, margin - pos_sim + neg_sim)
+    This encourages pos_sim > neg_sim + margin
+    """
+    
+    def __init__(self, margin: float = 0.2, temperature: float = 1.0):
+        super(MarginContrastiveLoss, self).__init__()
+        self.margin = margin
+        self.temperature = temperature
+    
+    def forward(self, query_emb: torch.Tensor, pos_doc_emb: torch.Tensor, 
+                neg_doc_emb: torch.Tensor) -> torch.Tensor:
+        """
+        Compute margin-based contrastive loss.
+        
+        Args:
+            query_emb: Query embeddings [batch_size, hidden_dim]
+            pos_doc_emb: Positive document embeddings [batch_size, hidden_dim]
+            neg_doc_emb: Negative document embeddings [batch_size, hidden_dim]
+            
+        Returns:
+            Margin contrastive loss and accuracy
+        """
+        # Compute similarities (cosine similarity since embeddings are L2 normalized)
+        pos_sim = torch.sum(query_emb * pos_doc_emb, dim=1) / self.temperature
+        neg_sim = torch.sum(query_emb * neg_doc_emb, dim=1) / self.temperature
+        
+        # Margin loss: max(0, margin - (pos_sim - neg_sim))
+        # Encourages pos_sim to be at least margin higher than neg_sim
+        loss = torch.clamp(self.margin - (pos_sim - neg_sim), min=0.0)
+        loss = loss.mean()
+        
+        # Compute accuracy (positive similarity should be higher than negative)
+        correct = (pos_sim > neg_sim).float()
+        accuracy = correct.mean()
+        
+        return loss, accuracy
+
+class TripletLoss(nn.Module):
+    """
+    Triplet loss for two-tower training.
+    
+    Loss = max(0, margin - pos_sim + neg_sim)
+    Same as MarginContrastiveLoss but with different naming convention.
+    """
+    
+    def __init__(self, margin: float = 0.2, temperature: float = 1.0):
+        super(TripletLoss, self).__init__()
+        self.margin = margin
+        self.temperature = temperature
+    
+    def forward(self, query_emb: torch.Tensor, pos_doc_emb: torch.Tensor, 
+                neg_doc_emb: torch.Tensor) -> torch.Tensor:
+        """
+        Compute triplet loss.
+        
+        Args:
+            query_emb: Query embeddings (anchor) [batch_size, hidden_dim]
+            pos_doc_emb: Positive document embeddings [batch_size, hidden_dim]
+            neg_doc_emb: Negative document embeddings [batch_size, hidden_dim]
+            
+        Returns:
+            Triplet loss and accuracy
+        """
+        # Compute distances (using negative cosine similarity as distance)
+        pos_dist = -torch.sum(query_emb * pos_doc_emb, dim=1) / self.temperature
+        neg_dist = -torch.sum(query_emb * neg_doc_emb, dim=1) / self.temperature
+        
+        # Triplet loss: max(0, pos_dist - neg_dist + margin)
+        # Encourages pos_dist < neg_dist - margin (positive closer than negative)
+        loss = torch.clamp(pos_dist - neg_dist + self.margin, min=0.0)
+        loss = loss.mean()
+        
+        # Compute accuracy (positive distance should be smaller than negative)
+        correct = (pos_dist < neg_dist).float()
+        accuracy = correct.mean()
         
         return loss, accuracy
 
