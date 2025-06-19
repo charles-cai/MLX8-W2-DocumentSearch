@@ -36,6 +36,16 @@ class MSMarcoTripletGenerator:
     
     def load_raw_data(self):
         """Load raw MS MARCO data from cache or download."""
+        # Decide whether to use fast mode based on max_samples
+        if self.max_samples and self.max_samples <= 100000:
+            print(f"🚀 Using fast mode for {self.max_samples:,} samples (early stopping enabled)")
+            return self._load_raw_data_limited()
+        else:
+            print("📦 Using full mode (processing all data)")
+            return self._load_raw_data_full()
+    
+    def _load_raw_data_full(self):
+        """Load full dataset for large samples or no limit."""
         cache_file = os.path.join(self.data_path, "msmarco_raw_data.pkl")
         
         if os.path.exists(cache_file):
@@ -100,6 +110,78 @@ class MSMarcoTripletGenerator:
         
         return queries, passages, qrels
     
+    def _load_raw_data_limited(self):
+        """Load limited data for fast triplet generation."""
+        cache_file = os.path.join(self.data_path, f"msmarco_raw_data_limited_{self.max_samples}.pkl")
+        
+        if os.path.exists(cache_file):
+            print("📦 Loading cached limited MS MARCO data...")
+            with open(cache_file, 'rb') as f:
+                data = pickle.load(f)
+            return data['queries'], data['passages'], data['qrels']
+        
+        print(f"🔄 Loading limited MS MARCO dataset (targeting {self.max_samples:,} triplets)...")
+        
+        # Load dataset
+        dataset = load_dataset("microsoft/ms_marco", "v1.1", split="train")
+        
+        # Process queries and passages with early stopping
+        queries = {}
+        passages = {}
+        qrels = {}
+        triplet_count = 0
+        
+        # Estimate: each query produces ~1-3 triplets on average
+        # So we need roughly max_samples / 2 queries to be safe
+        target_queries = min(self.max_samples * 2, len(dataset))
+        
+        print(f"🎯 Processing up to {target_queries:,} queries (estimated for {self.max_samples:,} triplets)")
+        
+        for i, item in enumerate(tqdm(dataset, desc="Processing MS MARCO (limited)", total=target_queries)):
+            if i >= target_queries:
+                break
+                
+            query_id = str(item['query_id'])
+            query_text = item['query']
+            
+            queries[query_id] = query_text
+            qrels[query_id] = []
+            
+            # Process passages
+            passages_data = item['passages']
+            if isinstance(passages_data, dict) and 'passage_text' in passages_data:
+                passage_texts = passages_data['passage_text']
+                is_selected_list = passages_data['is_selected']
+                
+                for j, (passage_text, is_selected) in enumerate(zip(passage_texts, is_selected_list)):
+                    passage_id = f"{query_id}_{j}"
+                    passages[passage_id] = passage_text
+                    
+                    if is_selected == 1:
+                        qrels[query_id].append(passage_id)
+                        triplet_count += 1
+            
+            # Early stopping if we have enough potential triplets
+            if triplet_count >= self.max_samples * 1.5:  # 50% buffer
+                print(f"🛑 Early stopping: Found {triplet_count:,} potential triplets (target: {self.max_samples:,})")
+                break
+        
+        # Cache the limited data
+        with open(cache_file, 'wb') as f:
+            pickle.dump({
+                'queries': queries,
+                'passages': passages,
+                'qrels': qrels,
+                'max_samples': self.max_samples,
+                'actual_queries_processed': len(queries)
+            }, f)
+        
+        print(f"✅ Processed {len(queries):,} queries and {len(passages):,} passages (limited mode)")
+        print(f"   Potential triplets: ~{triplet_count:,}")
+        print(f"   Cached to: {cache_file}")
+        
+        return queries, passages, qrels
+    
     def generate_triplets(self, queries: Dict, passages: Dict, qrels: Dict):
         """Generate training triplets from the data."""
         triplets = []
@@ -110,12 +192,25 @@ class MSMarcoTripletGenerator:
         
         print("🔄 Creating training triplets...")
         
+        # If we have max_samples, show target
+        if self.max_samples:
+            print(f"🎯 Target: {self.max_samples:,} triplets")
+        
         for query_id, relevant_passage_ids in tqdm(qrels.items(), desc="Generating triplets"):
             if not relevant_passage_ids:  # Skip queries with no relevant passages
                 continue
             
+            # Early stopping check (for efficiency when max_samples is set)
+            if self.max_samples and len(triplets) >= self.max_samples:
+                print(f"🛑 Reached target of {self.max_samples:,} triplets, stopping early")
+                break
+            
             # For each query, create multiple triplets
             for pos_passage_id in relevant_passage_ids:
+                # Early stopping check within inner loop too
+                if self.max_samples and len(triplets) >= self.max_samples:
+                    break
+                    
                 # Sample negative passages (not relevant to this query)
                 neg_candidates = [pid for pid in all_passage_ids 
                                 if pid not in relevant_passage_ids]
@@ -137,11 +232,6 @@ class MSMarcoTripletGenerator:
         
         # Shuffle triplets
         random.shuffle(triplets)
-        
-        # Limit if specified
-        if self.max_samples and len(triplets) > self.max_samples:
-            print(f"📝 Limiting to {self.max_samples:,} triplets (from {len(triplets):,})")
-            triplets = triplets[:self.max_samples]
         
         print(f"✅ Generated {len(triplets):,} training triplets")
         return triplets
