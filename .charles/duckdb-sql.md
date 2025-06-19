@@ -52,33 +52,28 @@ SELECT passages -> '$.is_selected' FROM 'hf://datasets/microsoft/ms_marco/v1.1/t
 
 ## Local Parquet files
 
+Raw Hugging Face MS MARCO data dets:
 ```sql
 SELECT * FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 10;
-
-SELECT * FROM '.data/ms_marco_v1.1/test.parquet' LIMIT 10;
+SELECT COUNT(*) FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 10;
+DESCRIBE '.data/ms_marco_v1.1/train.parquet';
 
 SELECT * FROM '.data/ms_marco_v1.1/validation.parquet' LIMIT 10;
-
-DESCRIBE '.data/ms_marco_v1.1/train.parquet';
-DESCRIBE '.data/ms_marco_v1.1/test.parquet';
+SELECT COUNT(*) FROM '.data/ms_marco_v1.1/validation.parquet' LIMIT 10;
 DESCRIBE '.data/ms_marco_v1.1/validation.parquet';
 
+SELECT * FROM '.data/ms_marco_v1.1/test.parquet' LIMIT 10;
+SELECT COUNT(*) FROM '.data/ms_marco_v1.1/test.parquet' LIMIT 10;
+DESCRIBE '.data/ms_marco_v1.1/test.parquet';
 
-SELECT COUNT(*) FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 10;
-
+-- JSON 
 SELECT passages -> '$.is_selected' FROM '.data/ms_marco_v1.1/train.parquet' LIMIT 2;
-
 SELECT MAX(query_id) as max, MIN(query_id) as min, COUNT (*), max-min + 1 as diff FROM  '.data/ms_marco_v1.1/train.parquet';
-
 SELECT passages -> '$.passage_text' FROM '.data/ms_marco_v1.1/test.parquet' LIMIT 2;
-
 SELECT passages -> '$.is_selected' AS s, passages -> '$.url' AS url FROM '.data/ms_marco_v1.1/test.parquet' LIMIT 2;
-
-
 SELECT passages -> '$.passage_text' FROM '.data/ms_marco_v1.1/test.parquet' LIMIT 1;
 
 -- ["We have been feeding our back yard squirrels for the fall and winter and we noticed that a few of them have missing fur. One has a patch miss…  ]
-
 
 -- JSON Table functions: https://duckdb.org/docs/stable/data/json/json_functions#json-table-functions
 
@@ -97,8 +92,17 @@ SELECT p.* FROM '.data/ms_marco_v1.1/test.parquet' AS test, json_each(test.passa
 Processed Triples Dataset
 ```sql
 SELECT * FROM '.data/processed/train_triples.parquet' LIMIT 10;
-
 SELECT COUNT(*) FROM '.data/processed/train_triples.parquet' LIMIT 10;
+DESCRIBE  '.data/processed/train_triples.parquet';
+
+SELECT * FROM '.data/processed/validation_triples.parquet' LIMIT 10;
+SELECT COUNT(*) FROM '.data/processed/validation_triples.parquet' LIMIT 10;
+DESCRIBE  '.data/processed/validation_triples.parquet';
+
+SELECT * FROM '.data/processed/test_triples.parquet' LIMIT 10;
+SELECT COUNT(*) FROM '.data/processed/test_triples.parquet' LIMIT 10;
+DESCRIBE  '.data/processed/test_triples.parquet'; 
+
 
 --
 -- ┌────────┬───────┬──────────────┬───────┐
@@ -108,11 +112,22 @@ SELECT COUNT(*) FROM '.data/processed/train_triples.parquet' LIMIT 10;
 -- │ 102128 │ 19699 │    82326     │ 82430 │
 -- └────────┴───────┴──────────────┴───────┘
 --
+```
 
+With word2vec embeddings precalculated:
+```sql
+-- train
 SELECT * FROM '.data/processed/train_triples_embeddings.parquet' LIMIT 10;
-
 SELECT COUNT(*) FROM '.data/processed/train_triples_embeddings.parquet' LIMIT 10;
-
 DESCRIBE '.data/processed/train_triples_embeddings.parquet';
 
+-- validation
+SELECT * FROM '.data/processed/validation_triples_embeddings.parquet' LIMIT 10;
+SELECT COUNT(*) FROM '.data/processed/validation_triples_embeddings.parquet' LIMIT 10;
+DESCRIBE '.data/processed/validation_triples_embeddings.parquet';
+
+-- test
+SELECT * FROM '.data/processed/test_triples_embeddings.parquet' LIMIT 10;
+SELECT COUNT(*) FROM '.data/processed/test_triples_embeddings.parquet' LIMIT 10;
+DESCRIBE '.data/processed/test_triples_embeddings.parquet';
 ```

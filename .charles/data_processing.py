@@ -8,6 +8,10 @@ from tqdm import tqdm
 from word2vec_utils import Word2vecUtils
 from logging_utils import setup_logging, with_exception_logging
 
+import faiss
+import torch
+import torch.nn.functional as F
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -227,10 +231,31 @@ class DataProcessing:
         pos_embs = []
         neg_embs = []
 
+        # Add lists for sequence embeddings
+        query_embs_seq = []
+        pos_doc_embs_seq = []
+        neg_doc_embs_seq = []
+
+        w2v_model = w2v_utils.w2v_model
+        vector_size = w2v_model.vector_size
+
+        def get_seq_embedding(text):
+            tokens = text.lower().split()
+            vectors = [w2v_model[word] for word in tokens if word in w2v_model]
+            if not vectors:
+                return [np.zeros(vector_size)]
+            return vectors
+
         for idx, row in tqdm(df.iterrows(), total=len(df), desc="Embedding rows"):
             query_embs.append(w2v_utils.embedding(row["query"]))
             pos_embs.append(w2v_utils.embedding(row["positive_doc"]))
             neg_embs.append(w2v_utils.embedding(row["negative_doc"]))
+
+            # Sequence embeddings
+            query_embs_seq.append(get_seq_embedding(row["query"]))
+            pos_doc_embs_seq.append(get_seq_embedding(row["positive_doc"]))
+            neg_doc_embs_seq.append(get_seq_embedding(row["negative_doc"]))
+            
 
         # Convert to numpy arrays
         query_embs = np.stack(query_embs)
@@ -241,6 +266,11 @@ class DataProcessing:
         df["query_emb"] = list(query_embs)
         df["positive_doc_emb"] = list(pos_embs)
         df["negative_doc_emb"] = list(neg_embs)
+
+        # Add sequence embeddings to DataFrame
+        df["query_emb_seq"] = query_embs_seq
+        df["positive_doc_emb_seq"] = pos_embs
+        df["negative_doc_emb_seq"] = neg_embs
 
         triple_embedding_path = os.path.join(self.MLX_DATASET_OUTPUT_DIR, f"{split}_triples_embeddings.parquet")
         self.logger.info(f"Saving embeddings to {triple_embedding_path}")
@@ -260,11 +290,6 @@ def main():
     parser.add_argument(
         "--gen-triples",
         action="store_true",
-#        nargs="?",
-#        const=None,
-#        metavar="SPLIT",
-#        choices=["train", "validation", "test"],
-#        help="Step 2: Generate training triples from parquet files. Optionally specify SPLIT (train, validation, test). Defaults to MLX_DATASET_TRIPLE_SPLIT."
          help="Step 2: Generate training triples from parquet files."
     )
     parser.add_argument(
@@ -272,9 +297,8 @@ def main():
         action="store_true",
         help="Step 3: Generate and store embeddings for triples"
     )
+
     args = parser.parse_args()
-    
-    # Show help and exit if no arguments are provided
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(0)
@@ -283,8 +307,6 @@ def main():
     logger.info("Starting MS MARCO dataset processing...")
     
     dp = DataProcessing()
-
-    # For --download, SPLIT is not needed
     if args.download:
         dp.download_and_save()
     elif args.gen_triples:
