@@ -82,8 +82,6 @@ for row in tqdm(dataset, desc="Creating triples..."):
     irrelevant_passages = [idx_to_passage[i] for i in irrel_indices]
 
     triples.append((query, relevant_passages, irrelevant_passages))
-    if len(triples) % 1000 == 0:
-        break
 
 # Save
 with open("triples_full.pkl", "wb") as f:
