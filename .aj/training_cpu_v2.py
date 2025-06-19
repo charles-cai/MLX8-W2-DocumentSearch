@@ -12,7 +12,6 @@ import json
 import re
 from tqdm import tqdm
 
-
 # -----------------------------
 # 1. Load Vocabulary & Pre-trained Embeddings
 # -----------------------------
@@ -89,8 +88,9 @@ for row in tqdm(dataset, desc="Creating triples..."):
 # Save
 with open("triples_full.pkl", "wb") as f:
     pickle.dump(triples, f)
-with open("selected_passages.pkl", "wb") as f:
-    pickle.dump(selected_passages, f)
+
+with open("selected_passages.pkl", "wb") as g:
+    pickle.dump(selected_passages, g)
 
 # -------------------------------
 # 2b. Load triples & selected docs from file
@@ -140,10 +140,6 @@ cbow_model.embeddings.weight.requires_grad = False
 
 # -------------------------------
 # 5. Embed queries, rel and irrel documents using pre-trained CBOW model
-# -------------------------------
-
-# -------------------------------
-# 4. Embed queries, rel and irrel documents using pre-trained CBOW model
 # -------------------------------
 
 device = torch.device("cpu")
@@ -216,7 +212,6 @@ process_and_save_embeddings(
     "query_embeds.pkl", "rel_doc_embeds.pkl", "irrel_doc_embeds.pkl",
     batch_size=1024
 )
-
 
 # -----------------------------
 # 6. Load Embeddings
@@ -475,7 +470,7 @@ def process_and_save_embeddings(
             rel_doc_embeds_batch.clear()
             irrel_doc_embeds_batch.clear()
 
-# Usage example:
+
 process_and_save_embeddings(
     tokenized_triples_val, word_to_ix, cbow_model,
     "query_embeds_val.pkl", "rel_doc_embeds_val.pkl", "irrel_doc_embeds_val.pkl",
@@ -495,6 +490,7 @@ for i in range(len(query_embeds_val)):
     rel_embed = rel_doc_embeds_val[i][0]                # [rel_len, embed_dim]; use the first relevant doc
     irrel_embed = irrel_doc_embeds_val[i][0]            # [irrel_len, embed_dim]; use the first irrelevant doc
     val_data.append((q_embed, rel_embed, [irrel_embed])) 
+
 
 # -----------------------------
 # 10. Create evaluation for the model using Recall@K
@@ -613,7 +609,11 @@ for epoch in range(num_epochs):
 
     print(f"Epoch {epoch+1}/{num_epochs} | Loss: {epoch_loss / len(dataloader):.4f}")
     if (epoch + 1) % 2 == 0:
-        recall = evaluate_model(qry_tower, doc_tower, val_data, cosine_similarity, K=1)
+        recall = evaluate_model(
+            qry_tower, doc_tower, val_data,
+            selected_passages_val, rel_doc_texts_val, irrel_doc_texts_val,
+            cosine_similarity, K=1
+        )
         print(f"Recall@1: {recall:.4f}")
 
     torch.save({
