@@ -390,29 +390,30 @@ for row in tqdm(val_dataset, desc="Creating validation triples..."):
     rel_doc_texts_val.append(relevant_passages)
     irrel_doc_texts_val.append(irrelevant_passages)
 
-    # Tokenize right here (so tokenized_triples_val stays aligned too)
-    def preprocess(text):
-        text = text.lower()
-        text = re.sub(r'[^a-z0-9 ]+', '', text)
-        return text.split()
-    
-    tokenized_query = preprocess(query)
-    tokenized_rels = [preprocess(doc) for doc in relevant_passages]
-    tokenized_irrels = [preprocess(doc) for doc in irrelevant_passages]
-    tokenized_triples_val.append((tokenized_query, tokenized_rels, tokenized_irrels))
-
 # Save
-with open("tokenized_triples_val.pkl", "wb") as f:
-    pickle.dump(tokenized_triples_val, f)
+with open("triples_val.pkl", "wb") as f:
+    pickle.dump(triples_val, f)
 with open("selected_passages_val.pkl", "wb") as g:
     pickle.dump(selected_passages_val, g)
 
 
 # # Load triples & selected docs
-# with open("tokenized_triples_val.pkl", "rb") as f:
+# with open("triples_val.pkl", "rb") as f:
 #     triples_val = pickle.load(f)
 # with open("selected_passages_val.pkl", "rb") as g:
 #     selected_passages_val = pickle.load(g)
+
+def preprocess(text):
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9 ]+', '', text)
+    return text.split()
+
+tokenized_triples_val = []
+for query, rel_docs, irrel_docs in tqdm(triples_val, desc="Tokenizing triples"):
+    tokenized_query = preprocess(query)
+    tokenized_rels = [preprocess(doc) for doc in rel_docs]
+    tokenized_irrels = [preprocess(doc) for doc in irrel_docs]
+    tokenized_triples_val.append((tokenized_query, tokenized_rels, tokenized_irrels))
 
 
 def process_and_save_embeddings(
