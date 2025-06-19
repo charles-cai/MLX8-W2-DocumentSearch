@@ -1,0 +1,75 @@
+name: two-tower-hyperparameter-sweep
+description: Hyperparameter sweep for Two-Tower MS MARCO model
+method: bayes
+metric:
+  name: eval/MRR
+  goal: maximize
+
+parameters:
+  # Model Architecture
+  hidden_dim:
+    values: [128, 256, 512, 768]
+  num_layers:
+    values: [1, 2, 3, 4]
+  dropout:
+    distribution: uniform
+    min: 0.0
+    max: 0.4
+
+  # Training Hyperparameters
+  batch_size:
+    values: [16, 32, 64, 128]
+  learning_rate:
+    distribution: log_uniform_values
+    min: 1e-5
+    max: 1e-2
+  optimizer:
+    values: ["adamw", "adam"]
+  weight_decay:
+    distribution: log_uniform_values
+    min: 1e-6
+    max: 1e-2
+  beta1:
+    distribution: uniform
+    min: 0.8
+    max: 0.95
+  beta2:
+    distribution: uniform
+    min: 0.9
+    max: 0.999
+
+  # Loss Function
+  temperature:
+    distribution: uniform
+    min: 0.05
+    max: 0.3
+
+  # Learning Rate Scheduler
+  scheduler:
+    values: ["cosine", "step", "reduce_on_plateau", "none"]
+
+  # Regularization
+  grad_clip:
+    distribution: uniform
+    min: 0.5
+    max: 2.0
+
+# Early termination for poor performing runs
+early_terminate:
+  type: hyperband
+  min_iter: 2
+  max_iter: 5
+  s: 2
+  eta: 3
+
+# Fixed parameters (not tuned)
+# These are set in the Python script:
+# - triplets_file: "./data/msmarco_triplets_5000.pkl"
+# - checkpoint_dir: "./checkpoints"
+# - epochs: 5
+# - eval_every_epoch: True
+# - eval_max_queries: 1000
+# - save_best_only: True
+# - patience: 3
+# - num_workers: 0
+# - log_freq: 200 
