@@ -1,0 +1,19 @@
+{
+  "redis": {
+    "url": "redis://default:YOUR_PASSWORD@YOUR_HOST:YOUR_PORT",
+    "host": "your-redis-host.redis.cloud",
+    "port": 12345,
+    "username": "default",
+    "password": "your_redis_password",
+    "db": 0
+  },
+  "vector_store": {
+    "index_name": "msmarco_docs",
+    "vector_dim": 256
+  },
+  "processing": {
+    "batch_size": 100,
+    "encoding_batch_size": 32,
+    "default_max_docs": null
+  }
+} 

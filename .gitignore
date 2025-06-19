@@ -199,6 +199,10 @@ wandb/
 .data/*
 !.data/.gitkeep
 
+# Redis configuration files (contains credentials)
+**/redis_config.json
+redis_config.json
+
 
 # Python cache and compiled files
 __pycache__/
