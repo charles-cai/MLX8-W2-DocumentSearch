@@ -221,3 +221,4 @@ dump.rdb
 # OS generated files
 .DS_Store
 .ben/data
+.ben/checkpoints
