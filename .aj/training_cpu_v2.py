@@ -330,6 +330,7 @@ dataset = TripleDataset(query_embeds, rel_doc_embeds, irrel_doc_embeds)
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
 
+
 # -----------------------------
 # 9. Load MS MARCO V1.1 validation dataset, process into triples and tokenize & embed
 # -----------------------------
@@ -349,7 +350,10 @@ num_passages = len(idx_to_passage)
 
 # 2. Create triples and selected passages
 triples_val = []
+rel_doc_texts_val = []
+irrel_doc_texts_val = []
 selected_passages_val = []
+tokenized_triples_val = []
 
 for row in tqdm(val_dataset, desc="Creating validation triples..."):
     query = row['query']
@@ -383,31 +387,32 @@ for row in tqdm(val_dataset, desc="Creating validation triples..."):
     irrelevant_passages = [idx_to_passage[i] for i in irrel_indices]
 
     triples_val.append((query, relevant_passages, irrelevant_passages))
+    rel_doc_texts_val.append(relevant_passages)
+    irrel_doc_texts_val.append(irrelevant_passages)
+
+    # Tokenize right here (so tokenized_triples_val stays aligned too)
+    def preprocess(text):
+        text = text.lower()
+        text = re.sub(r'[^a-z0-9 ]+', '', text)
+        return text.split()
+    
+    tokenized_query = preprocess(query)
+    tokenized_rels = [preprocess(doc) for doc in relevant_passages]
+    tokenized_irrels = [preprocess(doc) for doc in irrelevant_passages]
+    tokenized_triples_val.append((tokenized_query, tokenized_rels, tokenized_irrels))
 
 # Save
-with open("triples_val.pkl", "wb") as f:
-    pickle.dump(triples_val, f)
+with open("tokenized_triples_val.pkl", "wb") as f:
+    pickle.dump(tokenized_triples_val, f)
 with open("selected_passages_val.pkl", "wb") as g:
     pickle.dump(selected_passages_val, g)
 
 
-# Load triples & selected docs
-with open("triples_val.pkl", "rb") as f:
-    triples_val = pickle.load(f)
-with open("selected_passages_val.pkl", "rb") as g:
-    selected_passages_val = pickle.load(g)
-
-def preprocess(text):
-    text = text.lower()
-    text = re.sub(r'[^a-z0-9 ]+', '', text)
-    return text.split()
-
-tokenized_triples_val = []
-for query, rel_docs, irrel_docs in tqdm(triples, desc="Tokenizing triples"):
-    tokenized_query = preprocess(query)
-    tokenized_rels = [preprocess(doc) for doc in rel_docs]
-    tokenized_irrels = [preprocess(doc) for doc in irrel_docs]
-    tokenized_triples_val.append((tokenized_query, tokenized_rels, tokenized_irrels))
+# # Load triples & selected docs
+# with open("tokenized_triples_val.pkl", "rb") as f:
+#     triples_val = pickle.load(f)
+# with open("selected_passages_val.pkl", "rb") as g:
+#     selected_passages_val = pickle.load(g)
 
 
 def process_and_save_embeddings(
@@ -456,7 +461,7 @@ def process_and_save_embeddings(
         irrel_doc_embeds_batch.append(irrel_embs)
 
         # Save every batch_size triples
-        if (i + 1) % batch_size == 0 or (i + 1) == len(tokenized_triples):
+        if (i + 1) % batch_size == 0 or (i + 1) == len(tokenized_triples_val):
             with open(query_embeds_path, 'ab') as fq:
                 pickle.dump(query_embeds_batch, fq)
             with open(rel_doc_embeds_path, 'ab') as fr:
@@ -468,30 +473,32 @@ def process_and_save_embeddings(
             rel_doc_embeds_batch.clear()
             irrel_doc_embeds_batch.clear()
 
-
+# Usage example:
 process_and_save_embeddings(
     tokenized_triples_val, word_to_ix, cbow_model,
     "query_embeds_val.pkl", "rel_doc_embeds_val.pkl", "irrel_doc_embeds_val.pkl",
     batch_size=64
 )
 
+# -----------------------------
+# 9b. Load validation data embeddings
+# -----------------------------
+
 # Load them all
 query_embeds_val = load_all_batches("query_embeds_val.pkl")           # list of [query_len, embed_dim] tensors
 rel_doc_embeds_val = load_all_batches("rel_doc_embeds_val.pkl")       # list of lists: each is [num_docs] of [doc_len, embed_dim] tensors
 irrel_doc_embeds_val = load_all_batches("irrel_doc_embeds_val.pkl")
 
-
 val_data = []
-# Ensure lengths match (or handle indexing errors)
 for i in range(len(query_embeds_val)):
-    q_embed = query_embeds_val[i]                       # [q_len, embed_dim]
-    rel_embed = rel_doc_embeds_val[i][0]                # [rel_len, embed_dim]; use the first relevant doc
-    irrel_embed = irrel_doc_embeds_val[i][0]            # [irrel_len, embed_dim]; use the first irrelevant doc
-    val_data.append((q_embed, rel_embed, [irrel_embed])) 
+    q_embed = query_embeds_val[i]
+    rel_embeds = rel_doc_embeds_val[i]
+    irrel_embeds = irrel_doc_embeds_val[i]
+    val_data.append((q_embed, rel_embeds, irrel_embeds))
 
 
 # -----------------------------
-# 10. Create evaluation for the model using Recall@K
+# 10. Evaluate the model using Recall@K
 # -----------------------------
 
 def evaluate_model(
@@ -535,7 +542,7 @@ def evaluate_model(
 
             # Compute distances (query vs. all docs)
             sims = distance_fn(q_vec.repeat(len(doc_lens), 1), d_vecs)  # (num_candidates,)
-            sorted_indices = torch.argsort(sims, descending=True)  # Sort by highest similarity
+            sorted_indices = torch.argsort(sims, descending=True)  # Smallest = most similar
 
             # Recall@K: Is gold doc in top K?
             if gold_idx in sorted_indices[:K]:
@@ -544,10 +551,6 @@ def evaluate_model(
 
     recall_at_k = num_correct / total if total > 0 else 0.0
     return recall_at_k
-
-
-rel_doc_texts_val = [rels for _, rels, _ in triples_val]
-irrel_doc_texts_val = [irrels for _, _, irrels in triples_val]
 
 
 # -----------------------------
@@ -559,8 +562,8 @@ hidden_dim = 128
 margin = 0.2
 distance_function = cosine_similarity
 
-qry_tower = QueryTower(embed_dim, hidden_dim, rnn_type='gru')  # or 'lstm'
-doc_tower = DocTower(embed_dim, hidden_dim, rnn_type='gru')  # or 'lstm'
+qry_tower = QueryTower(embed_dim=200, hidden_dim=128, rnn_type='gru')  # or 'lstm'
+doc_tower = DocTower(embed_dim=200, hidden_dim=128, rnn_type='gru')  # or 'lstm'
 
 optimizer = torch.optim.Adam(list(qry_tower.parameters()) + list(doc_tower.parameters()), lr=1e-3)
 num_epochs = 10
