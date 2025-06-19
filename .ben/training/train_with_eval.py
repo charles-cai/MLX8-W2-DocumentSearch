@@ -24,7 +24,7 @@ from train_two_tower_from_triplets import PreprocessedMSMarcoDataset, train_from
 from two_tower_model import TwoTowerModel, ContrastiveLoss, TwoTowerCollator
 
 # Import evaluation components
-sys.path.append('../evaluation')
+sys.path.append('./evaluation')
 from eval_integration import evaluate_trained_model
 
 def train_with_evaluation(triplets_file: str, 
