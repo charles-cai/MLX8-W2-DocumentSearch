@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: data-processing",
+            "name": "data_processing - Download HF Dataset",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/.charles/data_processing.py",
@@ -10,6 +10,26 @@
             "cwd": "${workspaceFolder}/.charles",
             "console": "integratedTerminal",
             "args": ["--download"]
+        },
+        {
+            "name": "data_processing - Gen Triples",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/.charles/data_processing.py",
+            "pythonPath": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}/.charles",
+            "console": "integratedTerminal",
+            "args": ["--gen-triples"]
+        },
+        {
+            "name": "data_processing - Store Embeddings",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/.charles/data_processing.py",
+            "pythonPath": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}/.charles",
+            "console": "integratedTerminal",
+            "args": ["--embedding"]
         }
     ]
 }

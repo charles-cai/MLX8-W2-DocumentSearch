@@ -26,7 +26,6 @@ EOF
 # duckdb
 curl https://install.duckdb.org | sh
 echo "export PATH='/root/.duckdb/cli/latest':\$PATH" >> ~/.bashrc
-source ~/.bashrc
 
 # redis
 apt install sudo -y
@@ -42,13 +41,18 @@ apt install locales -y
 # /usr/bin/redis-server 
 # redis-cli ping 
 
+source ~/.bashrc
+
+
 uv sync
-# activate virtual environment for running python scripts
 source .venv/bin/activate
+
+
 echo "Setup complete - virtual environment activated. You can now run Python scripts directly."
 echo "Run 'git lfs pull' to download large files."
 
 which python
 which uv
 
-echo "Please don't forget to copy .env.example to .env in your work folder, and add API Keys"
+cp .env.exmaple .env
+echo "!!Please edit the .env file with your configuration!!"

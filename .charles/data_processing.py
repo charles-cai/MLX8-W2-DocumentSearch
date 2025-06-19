@@ -5,7 +5,7 @@ import pandas as pd
 from datasets import load_dataset
 import numpy as np
 from tqdm import tqdm
-
+from word2vec_utils import Word2vecUtils
 from logging_utils import setup_logging, with_exception_logging
 
 from dotenv import load_dotenv
@@ -16,91 +16,92 @@ class DataProcessing:
         self.logger = setup_logging(__name__)
         self.logger.info("Initializing DataProcessing...")
 
-        self.HF_DATASETS_CACHE = os.getenv("HF_DATASETS_CACHE")
-        self.HF_TOKEN = os.getenv("HF_TOKEN")
-        self.HF_ORGANIZATION = os.getenv("HF_ORGANIZATION")
-        self.HF_DATASET = os.getenv("HF_DATASET")
-        self.HF_DATASET_VERSION = os.getenv("HF_DATASET_VERSION")
-        self.HF_DATASET_SPLITS = os.getenv("HF_DATASET_SPLITS", "train,validation,test").split(",")
-        self.HF_DATASET_OUTPUT_DIR = os.getenv("HF_DATASET_OUTPUT_DIR")
-        self.MLX_DATASET_OUTPUT_DIR = os.getenv("MLX_DATASET_OUTPUT_DIR")
-        self.MLX_DATASET_TRIPLE_SPLIT = os.getenv("MLX_DATASET_TRIPLE_SPLIT", "train")
-        
-        if not self.HF_DATASETS_CACHE:
-            self.logger.warning("HF_DATASETS_CACHE not set, using default cache location")
-        
-        os.environ["HF_DATASETS_CACHE"] = self.HF_DATASETS_CACHE
-        self.logger.info(f"Cache directory: {self.HF_DATASETS_CACHE}")
-        self.logger.info(f"HF Output directory: {self.HF_DATASET_OUTPUT_DIR}")
-        self.logger.info(f"MLX Output directory: {self.MLX_DATASET_OUTPUT_DIR}")
-        self.logger.info(f"MLX Triple split: {self.MLX_DATASET_TRIPLE_SPLIT}")
+        # Only load env vars actually used in this file, with default values
+        self.HF_DATASETS_CACHE = os.getenv("HF_DATASETS_CACHE", "./.data/hf")
+        self.HF_TOKEN = os.getenv("HF_TOKEN", "")
+        self.HF_ORGANIZATION = os.getenv("HF_ORGANIZATION", "microsoft")
+        self.HF_DATASET = os.getenv("HF_DATASET", "ms_marco")
+        self.HF_DATASET_VERSION = os.getenv("HF_DATASET_VERSION", "v1.1")
+        self.HF_DATASET_OUTPUT_DIR = os.getenv("HF_DATASET_OUTPUT_DIR", "./.data")
+        self.MLX_DATASET_OUTPUT_DIR = os.getenv("MLX_DATASET_OUTPUT_DIR", "./.data/processed")
+    
+        splits_str = os.getenv("HF_DATASET_SPLITS", "train,validation,test")
+        self.HF_DATASET_SPLITS = [s.strip() for s in splits_str.split(",")]
+ 
+        self.BASE_OUTPUT_DIR = os.path.join(self.HF_DATASET_OUTPUT_DIR, f"{self.HF_DATASET}_{self.HF_DATASET_VERSION}")
 
-    def download_and_save(self, split):
-        self.logger.info(f"Starting download_and_save for split: {split}")
-        base_output_dir = os.path.join(
-            self.HF_DATASET_OUTPUT_DIR, f"{self.HF_DATASET}_{self.HF_DATASET_VERSION}"
-        )
-        os.makedirs(base_output_dir, exist_ok=True)
-        parquet_file_path = os.path.join(base_output_dir, f"{split}.parquet")
+        self.logger.warning(f"Cache directory: {self.HF_DATASETS_CACHE}")
+        self.logger.warning(f"HF Output directory: {self.HF_DATASET_OUTPUT_DIR}")
+        self.logger.warning(f"MLX Output directory: {self.MLX_DATASET_OUTPUT_DIR}")
+        self.logger.warning(f"BASE Output directory: {self.BASE_OUTPUT_DIR}")
+
+    def download_and_save(self):
+        self.logger.info(f"Starting download_and_save...")
+
+        os.makedirs(self.BASE_OUTPUT_DIR, exist_ok=True)        
         
         # Check if file already exists using existing method
-        try:
-            self._check_parquet_file(split)
-            self.logger.warning(f"File already exists: {parquet_file_path}")
-            response = input(f"Overwrite existing {split}.parquet file? [Y/n]: ").strip().lower()
-            if response in ['n', 'no']:
-                self.logger.info(f"Skipping download for {split} split")
-                return
-            elif response == '' or response in ['y', 'yes', 'Y']:
-                self.logger.info(f"Proceeding with overwrite for {split} split")
-            else:
-                self.logger.warning(f"Invalid response '{response}', skipping download for {split} split")
-                return
-        except FileNotFoundError:
-            # File doesn't exist, proceed with download
-            pass
-        
-        self.logger.info(f"Starting download for split: {split}")
-        
-        dataset = load_dataset(
-            f"{self.HF_ORGANIZATION}/{self.HF_DATASET}",
-            self.HF_DATASET_VERSION,
-            split=split,
-            token=self.HF_TOKEN if self.HF_TOKEN else None
-        )
-        
-        self.logger.info(f"Saving {split} dataset to: {parquet_file_path}")
-        dataset.to_parquet(parquet_file_path)
-        
-        self.logger.success(f"Successfully saved {split} dataset ({len(dataset)} records)")
-        self.logger.info(f"Completed download_and_save for split: {split}")
+        for split in self.HF_DATASET_SPLITS:
+            parquet_file_path = self._check_raw_parquet_file(split)
 
-    def _check_parquet_file(self, split):
-        self.logger.debug(f"Checking parquet file for split: {split}")
+            if parquet_file_path is not None:
+                self.logger.warning(f"{split} File already exists in {parquet_file_path}")
+                response = input(f"Overwrite existing {split}.parquet file? [Y/n]: ").strip().lower()
+                if response in ['n', 'no', 'N']:
+                    self.logger.info(f"Skipping download for {split} split")
+                    continue
+                elif response not in ['y', 'yes', 'Y']:
+                    self.logger.error(f"Invaid response {response}', skipping downlad for {split} split.")
+                    return 
+            
+            dataset = load_dataset(
+                f"{self.HF_ORGANIZATION}/{self.HF_DATASET}",
+                self.HF_DATASET_VERSION,
+                split=split,
+                token=self.HF_TOKEN if self.HF_TOKEN else None
+            )
+            
+            self.logger.info(f"Saving {split} dataset to: {parquet_file_path}")
+            dataset.to_parquet(parquet_file_path)
+
+            self.logger.success(f"Successfully saved {split} dataset ({len(dataset)} records)")
+            self.logger.info(f"Completed download_and_save for split: {split}")
+       
+    def _check_raw_parquet_file(self, split):
         """
         Check if parquet file exists for the given split.
         Returns the file path if exists, raises FileNotFoundError if not.
         """
-        base_output_dir = os.path.join(
-            self.HF_DATASET_OUTPUT_DIR, f"{self.HF_DATASET}_{self.HF_DATASET_VERSION}"
-        )
+
+        base_output_dir = os.path.join(self.HF_DATASET_OUTPUT_DIR, f"{self.HF_DATASET}_{self.HF_DATASET_VERSION}")
         parquet_file_path = os.path.join(base_output_dir, f"{split}.parquet")
-        
+
         if not os.path.exists(parquet_file_path):
             self.logger.error(f"Parquet file not found: {parquet_file_path}")
             raise FileNotFoundError(f"Parquet file not found: {parquet_file_path}")
         
-        self.logger.debug(f"Parquet file found: {parquet_file_path}")
+        self.logger.warning(f"Parquet file found: {parquet_file_path}")
         return parquet_file_path
     
-    def gen_triples(self, split):
-        self.logger.info(f"Starting gen_triples for split: {split}")
+    def gen_triples_all(self):
+        """
+        Generate training triples for all splits defined in HF_DATASET_SPLITS.
+        Calls gen_triples for each split and saves the results.
+        """
+        self.logger.info("Starting gen_triples_all for all splits")
+        
+        for split in self.HF_DATASET_SPLITS:
+            self._gen_triples(split)
+  
+    def _gen_triples(self, split):
         """
         Generate training triples from the parquet file by parsing JSON passages.
         Each record is expanded into multiple rows based on passage_text array.
         Returns a DataFrame with columns: id, query, query_id, is_selected, negative_query_id, positive_doc
         """
-        parquet_file_path = self._check_parquet_file(split)
+        self.logger.info(f"Starting gen_triples for {split}")
+
+        parquet_file_path = self._check_raw_parquet_file(split)
         self.logger.info(f"Reading parquet file: {parquet_file_path}")
         df = pd.read_parquet(parquet_file_path)
         total_records = len(df)
@@ -124,23 +125,22 @@ class DataProcessing:
                 results.append({
                     'id': auto_id,
                     'query': row['query'],
-                    'answer': row['answers'],  # Fix: use 'answers' and add comma
+                    'answer': row['answers'],
                     'query_id': row['query_id'],
-                    'is_selected': is_selected[i],  # Use actual value
-                    'positive_doc': passage_text,  # Fix: use passage_text variable
+                    'is_selected': is_selected[i],
+                    'positive_doc': passage_text,
                 })
                 auto_id += 1
 
         result_df = pd.DataFrame(results)
-        
         if len(result_df) == 0:
             self.logger.error("No valid triples generated")
-            return pd.DataFrame()
+            return
         
-        self.logger.info(f"Generated {len(result_df)} triples from {total_records} original records")
-        
+        self.logger.info(f"Generated {len(result_df)} triples from {total_records} original records; generating randomized negative docs")
+
         # Randomize negative id and negative_query_id columns
-        result_df = self.def_randomize_negative_query_id(result_df)
+        result_df = self._def_randomize_negative_query_id(result_df)
         
         os.makedirs(self.MLX_DATASET_OUTPUT_DIR, exist_ok=True)
         triples_file_path = os.path.join(self.MLX_DATASET_OUTPUT_DIR, f"{split}_triples.parquet")
@@ -150,40 +150,15 @@ class DataProcessing:
         self.logger.info(f"Completed gen_triples for split: {split}")
         return result_df
 
-    def def_randomize_negative_query_id(self, df):
-        self.logger.info("Starting def_randomize_negative_query_id")
+    def _def_randomize_negative_query_id(self, df):
+        self.logger.info("Starting _def_randomize_negative_query_id")
         
         # Use numpy arrays for faster operations
         ids = df['id'].values
         query_ids = df['query_id'].values
         positive_docs = df['positive_doc'].values
-        n = len(ids)
-
-        # Optimized derangement using numpy
-        def fast_derangement(arr1, arr2):
-            indices = np.arange(n)
-            max_attempts = 1000
-            
-            for _ in range(max_attempts):
-                np.random.shuffle(indices)
-                if np.all(arr2 != arr2[indices]):
-                    return arr1[indices], arr2[indices]
-            
-            # Fallback: manual swap if needed
-            while np.any(arr2 == arr2[indices]):
-                conflicts = np.where(arr2 == arr2[indices])[0]
-                if len(conflicts) >= 2:
-                    indices[conflicts[0]], indices[conflicts[1]] = indices[conflicts[1]], indices[conflicts[0]]
-                else:
-                    # Find a non-conflicting position
-                    for i in range(n):
-                        if i not in conflicts and arr2[conflicts[0]] != arr2[i]:
-                            indices[conflicts[0]], indices[i] = indices[i], indices[conflicts[0]]
-                            break
-            
-            return arr1[indices], arr2[indices]
-
-        negative_ids, negative_query_ids = fast_derangement(ids, query_ids)
+        
+        negative_ids, negative_query_ids = self._fast_derangement(ids, query_ids)
         
         # Vectorized lookup for negative_doc using negative_ids
         id_to_doc_map = dict(zip(ids, positive_docs))
@@ -194,56 +169,84 @@ class DataProcessing:
         df['negative_query_id'] = negative_query_ids
         df['negative_doc'] = negative_docs
 
-        self.logger.info("Completed def_randomize_negative_query_id")
+        self.logger.info("Completed _def_randomize_negative_query_id")
         return df
 
-def store_embeddings(w2v_utils):
-    """
-    Compute and store embeddings for query, positive_doc, and negative_doc columns.
-    Uses environment variables for input/output paths.
-    """
+    # Optimized derangement using numpy
+    def _fast_derangement(self, arr1, arr2):
+        
+        n = len(arr1)
+        indices = np.arange(n)
+        max_attempts = 1000
+        
+        for _ in range(max_attempts):
+            np.random.shuffle(indices)
+            if np.all(arr2 != arr2[indices]):
+                return arr1[indices], arr2[indices]
+        
+        # Fallback: manual swap if needed
+        while np.any(arr2 == arr2[indices]):
+            conflicts = np.where(arr2 == arr2[indices])[0]
+            if len(conflicts) >= 2:
+                indices[conflicts[0]], indices[conflicts[1]] = indices[conflicts[1]], indices[conflicts[0]]
+            else:
+                # Find a non-conflicting position
+                for i in range(n):
+                    if i not in conflicts and arr2[conflicts[0]] != arr2[i]:
+                        indices[conflicts[0]], indices[i] = indices[i], indices[conflicts[0]]
+                        break
+        
+        return arr1[indices], arr2[indices]
+    
+    def store_embeddings_all(self):
+        self.logger.info("Starting store_embeddings, loading word2vec model, ..")
+        w2v_utils = Word2vecUtils()
+        if w2v_utils.w2v_model is None:
+            self.logger.warning("Word2Vec model not loaded, loading now...")
+            w2v_utils.load_word2vec()
 
-    # Use environment variables for paths
-    mlx_dataset_output_dir = os.getenv("MLX_DATASET_OUTPUT_DIR", ".data/processed")
-    triple_split = os.getenv("MLX_DATASET_TRIPLE_SPLIT", "train")
-    triples_path = os.path.join(mlx_dataset_output_dir, f"{triple_split}_triples.parquet")
-    output_path = os.path.join(mlx_dataset_output_dir, f"{triple_split}_triples_embeddings.parquet")
+        self.logger.info("Completed store_embeddings_all for all splits")
+        for split in self.HF_DATASET_SPLITS:
+            self._store_embeddings(split, w2v_utils)
+        
+    def _store_embeddings(self, split, w2v_utils):
+        """
+        Compute and store embeddings for query, positive_doc, and negative_doc columns.
+        Uses instance variables for input/output paths.
+        """
+            
+        triples_output_path = os.path.join(self.MLX_DATASET_OUTPUT_DIR, f"{split}_triples.parquet")
+        
+        self.logger.info(f"Loading triples from {triples_output_path}")
+        df = pd.read_parquet(triples_output_path)
+        self.logger.info(f"Loaded {len(df)} triples.")
 
-    logger = w2v_utils.logger
-    logger.info(f"Loading triples from {triples_path}")
-    df = pd.read_parquet(triples_path)
-    logger.info(f"Loaded {len(df)} triples")
+        # Compute embeddings for each row with tqdm progress bar
+        self.logger.info("Computing embeddings for query, positive_doc, and negative_doc...")
+        query_embs = []
+        pos_embs = []
+        neg_embs = []
 
-    # Ensure Word2Vec model is loaded
-    if w2v_utils.w2v_model is None:
-        logger.info("Word2Vec model not loaded, loading now...")
-        w2v_utils.load_word2vec()
+        for idx, row in tqdm(df.iterrows(), total=len(df), desc="Embedding rows"):
+            query_embs.append(w2v_utils.embedding(row["query"]))
+            pos_embs.append(w2v_utils.embedding(row["positive_doc"]))
+            neg_embs.append(w2v_utils.embedding(row["negative_doc"]))
 
-    # Compute embeddings for each row with tqdm progress bar
-    logger.info("Computing embeddings for query, positive_doc, and negative_doc...")
-    query_embs = []
-    pos_embs = []
-    neg_embs = []
+        # Convert to numpy arrays
+        query_embs = np.stack(query_embs)
+        pos_embs = np.stack(pos_embs)
+        neg_embs = np.stack(neg_embs)
 
-    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Embedding rows"):
-        query_embs.append(w2v_utils.embedding(row["query"]))
-        pos_embs.append(w2v_utils.embedding(row["positive_doc"]))
-        neg_embs.append(w2v_utils.embedding(row["negative_doc"]))
+        # Add new columns to DataFrame
+        df["query_emb"] = list(query_embs)
+        df["positive_doc_emb"] = list(pos_embs)
+        df["negative_doc_emb"] = list(neg_embs)
 
-    # Convert to numpy arrays
-    query_embs = np.stack(query_embs)
-    pos_embs = np.stack(pos_embs)
-    neg_embs = np.stack(neg_embs)
-
-    # Add new columns to DataFrame
-    df["query_emb"] = list(query_embs)
-    df["positive_doc_emb"] = list(pos_embs)
-    df["negative_doc_emb"] = list(neg_embs)
-
-    logger.info(f"Saving embeddings to {output_path}")
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    df.to_parquet(output_path, index=False)
-    logger.success(f"Stored embeddings for {len(df)} triples at {output_path}")
+        triple_embedding_path = os.path.join(self.MLX_DATASET_OUTPUT_DIR, f"{split}_triples_embeddings.parquet")
+        self.logger.info(f"Saving embeddings to {triple_embedding_path}")
+    
+        df.to_parquet(triple_embedding_path, index=False)
+        self.logger.info(f"Stored embeddings for {len(df)} triples at {triple_embedding_path}")
 
 @with_exception_logging
 def main():
@@ -255,9 +258,14 @@ def main():
         help="Step 1: Download and save datasets to local storage"
     )
     parser.add_argument(
-        "--gen-triples", 
-        action="store_true", 
-        help="Step 2: Generate training triples from parquet files"
+        "--gen-triples",
+        action="store_true",
+#        nargs="?",
+#        const=None,
+#        metavar="SPLIT",
+#        choices=["train", "validation", "test"],
+#        help="Step 2: Generate training triples from parquet files. Optionally specify SPLIT (train, validation, test). Defaults to MLX_DATASET_TRIPLE_SPLIT."
+         help="Step 2: Generate training triples from parquet files."
     )
     parser.add_argument(
         "--embedding",
@@ -274,44 +282,19 @@ def main():
     logger = setup_logging(__name__)
     logger.info("Starting MS MARCO dataset processing...")
     
-    try:
-        dp = DataProcessing()
-        
-        if args.download:
-            logger.info("Download flag detected, proceeding with dataset download...")
-            for split in dp.HF_DATASET_SPLITS:
-                dp.download_and_save(split)
-            logger.success("All datasets processed successfully!")
-        
-        if args.gen_triples:
-            logger.info("Generate triples flag detected, checking parquet files...")
-            # Only check the specific split for triple generation
-            triple_split = dp.MLX_DATASET_TRIPLE_SPLIT
-            try:
-                dp._check_parquet_file(triple_split)
-            except FileNotFoundError:
-                logger.error(f"Missing parquet file for split: {triple_split}. Run with --download first.")
-                sys.exit(1)
+    dp = DataProcessing()
+
+    # For --download, SPLIT is not needed
+    if args.download:
+        dp.download_and_save()
+    elif args.gen_triples:
+        dp.gen_triples_all()
+    elif args.embedding:
+        dp.store_embeddings_all()
+    else:
+        logger.error("No valid action flags provided")
+        parser.print_help()
+        sys.exit(-1)
             
-            # Generate triples only for the specified split
-            logger.info(f"Generating triples for {triple_split} split only...")
-            triples_df = dp.gen_triples(triple_split)
-            logger.info(f"Generated {len(triples_df)} triples for {triple_split} split")
-            logger.success("Triple generation completed successfully!")
-
-        if args.embedding:
-            logger.info("Embedding flag detected, generating and storing embeddings for triples...")
-            from word2vec_utils import Word2vecUtils
-            w2v_utils = Word2vecUtils()
-            store_embeddings(w2v_utils)
-            logger.success("Embeddings generated and stored successfully!")
-
-        if not args.download and not args.gen_triples and not args.embedding:
-            logger.info("No action flags provided. Use --download to download datasets, --gen-triples to generate triples, or --embedding to generate embeddings.")
-        
-    except Exception as e:
-        logger.error(f"Processing failed: {e}")
-        sys.exit(1)
-
 if __name__ == "__main__":
     main()
