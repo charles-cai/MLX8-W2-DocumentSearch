@@ -23,4 +23,5 @@ dependencies = [
     "sentence-transformers>=4.1.0",
     "gensim>=4.3.3",
     "redis>=6.2.0",
+    "faiss-gpu-cu12>=1.11.0",
 ]

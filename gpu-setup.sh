@@ -29,24 +29,25 @@ echo "export PATH='/root/.duckdb/cli/latest':\$PATH" >> ~/.bashrc
 
 # redis
 apt install sudo -y
-sudo apt-get install lsb-release curl gpg
+sudo apt install -y lsb-release curl gpg
 curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
 sudo chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg
 echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
-sudo apt-get update
-sudo apt-get install redis
+sudo apt update
+sudo apt -y install redis
 
+# fix UTF-8 locale issues
 apt install locales -y
+
+# Docker inside Docker? 
 # To start (in GPU Docker, there's no systemd), and to ping
 # /usr/bin/redis-server 
 # redis-cli ping 
 
 source ~/.bashrc
 
-
 uv sync
 source .venv/bin/activate
-
 
 echo "Setup complete - virtual environment activated. You can now run Python scripts directly."
 echo "Run 'git lfs pull' to download large files."
@@ -54,5 +55,4 @@ echo "Run 'git lfs pull' to download large files."
 which python
 which uv
 
-cp .env.exmaple .env
-echo "!!Please edit the .env file with your configuration!!"
+echo "!!Please cp .env.example to .env, and edit with your API_Keys!!"
