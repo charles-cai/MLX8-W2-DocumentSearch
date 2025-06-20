@@ -78,7 +78,7 @@ class TwoTowerRNN:
         self.TRIPLES_DATA_PATH_TEST = os.path.join(self.MLX_DATASET_OUTPUT_DIR,  "test_triples.parquet")
     
         self.WANDB_PROJECT = os.getenv("WANDB_PROJECT", "mlx8-week2-document-search")
-        self.WANDB_RUN_NAME2 = os.getenv("WANDB_RUN_NAME2", "two-tower-rnn")
+        self.WANDB_RUN_NAME = os.getenv("WANDB_RUN_NAME", "two-tower")
         
         self.TWO_TOWER_RNN_MODEL_PATH = os.path.join(self.MODEL_OUTPUT_DIR, "two_tower_rnn.pt")
 
@@ -93,7 +93,7 @@ class TwoTowerRNN:
         self.logger.info(f"TRIPLES_DATA_PATH_VALIDATION: {self.TRIPLES_DATA_PATH_VALIDATION}")
         self.logger.info(f"TRIPLES_DATA_PATH_TEST: {self.TRIPLES_DATA_PATH_TEST}")
         self.logger.info(f"WANDB_PROJECT: {self.WANDB_PROJECT}")
-        self.logger.info(f"WANDB_RUN_NAME2: {self.WANDB_RUN_NAME2}")
+        self.logger.info(f"WANDB_RUN_NAME: {self.WANDB_RUN_NAME}")
         self.logger.info(f"TWO_TOWER_RNN_MODEL_PATH: {self.TWO_TOWER_RNN_MODEL_PATH}")
 
         # Initialize Word2Vec utils
@@ -203,7 +203,7 @@ class TwoTowerRNN:
 
         wandb.init(
             project=self.WANDB_PROJECT,
-            name=self.WANDB_RUN_NAME2 + "_rnn"
+            name=self.WANDB_RUN_NAME + "_rnn"
         )
 
         # Log environment values to wandb

@@ -57,7 +57,7 @@ class TwoTowerTiny:
         self.TRIPLES_EMBEDDINGS_DATA_PATH_TEST = os.path.join(self.MLX_DATASET_OUTPUT_DIR, "test_triples_embeddings.parquet")
         
         self.WANDB_PROJECT = os.getenv("WANDB_PROJECT", "mlx8-week2-document-search")
-        self.WANDB_RUN_NAME = os.getenv("WANDB_RUN_NAME", "two-tower-training")
+        self.WANDB_RUN_NAME = os.getenv("WANDB_RUN_NAME", "two-tower")
         
         self.TWO_TOWER_TINY_MODEL_PATH = os.path.join(self.MODEL_OUTPUT_DIR, "two_tower_tiny.pt")
 
