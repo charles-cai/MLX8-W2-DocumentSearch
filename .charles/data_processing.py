@@ -220,7 +220,19 @@ class DataProcessing:
         self.logger.info("Completed store_embeddings_all for all splits")
         for split in self.HF_DATASET_SPLITS:
             self._store_embeddings(split, w2v_utils)
-        
+    
+    def _get_seq_embedding(self, w2v_model, vector_size, row_id, query_id, text):
+        tokens = text.lower().split()
+        if len(tokens) > self.MAX_TOKEN:
+            self.logger.warning(f"#{row_id} query_id {query_id}: text length {len(tokens)} exceeds MAX_TOKEN {self.MAX_TOKEN}")
+            tokens = tokens[:self.MAX_TOKEN]
+
+        vectors = [w2v_model[word] for word in tokens if word in w2v_model]
+        if not vectors:
+            return [np.zeros(vector_size, dtype=np.float32)]
+        return [vec.astype(np.float32) for vec in vectors]
+
+
     def _store_embeddings(self, split, w2v_utils):
         """
         Compute and store embeddings for query, positive_doc, and negative_doc columns.
@@ -247,25 +259,16 @@ class DataProcessing:
         w2v_model = w2v_utils.w2v_model
         vector_size = w2v_model.vector_size
 
-        def get_seq_embedding(text):
-            tokens = text.lower().split()
-            # Limit tokens to MAX_TOKEN
-            tokens = tokens[:self.MAX_TOKEN]
-            vectors = [w2v_model[word] for word in tokens if word in w2v_model]
-            if not vectors:
-                return [np.zeros(vector_size, dtype=np.float32)]
-            return [vec.astype(np.float32) for vec in vectors]
-
         for idx, row in tqdm(df.iterrows(), total=len(df), desc="Embedding rows"):
             query_embs.append(w2v_utils.embedding(row["query"]))
             pos_embs.append(w2v_utils.embedding(row["positive_doc"]))
             neg_embs.append(w2v_utils.embedding(row["negative_doc"]))
+            query_id = row["query_id"]
 
             # Sequence embeddings
-            query_embs_seq.append(get_seq_embedding(row["query"]))
-            pos_doc_embs_seq.append(get_seq_embedding(row["positive_doc"]))
-            neg_doc_embs_seq.append(get_seq_embedding(row["negative_doc"]))
-            
+            query_embs_seq.append(self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["query"]))
+            pos_doc_embs_seq.append(self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["positive_doc"]))
+            neg_doc_embs_seq.append(self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["negative_doc"]))
 
         # Convert to numpy arrays
         query_embs = np.stack(query_embs)
