@@ -11,7 +11,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
 
 # starship
-curl -sS https://starship.rs/install.sh | sh
+curl -sS https://starship.rs/install.sh | sh -s -- --yes
 echo 'eval "$(starship init bash)"' >> ~/.bashrc
 
 mkdir -p "~/.config"
