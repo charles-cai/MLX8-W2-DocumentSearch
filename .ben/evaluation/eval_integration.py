@@ -12,8 +12,9 @@ import os
 from typing import Dict, Optional
 
 # Add paths for imports
-sys.path.append('../training')
-sys.path.append('.')
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(current_dir, '..', 'training'))
+sys.path.append(current_dir)
 
 from ms_marco_evaluator import MSMarcoEvaluator, load_model_for_evaluation
 from two_tower_model import TwoTowerModel

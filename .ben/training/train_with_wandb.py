@@ -145,6 +145,9 @@ def evaluate_trained_model_wrapper(model, device, epoch, data_path, max_queries)
     # Fallback: use simple evaluation with training data
     # Try to find the triplets file
     possible_triplets = [
+        "../data/msmarco_triplets_2k_20250618_171140.pkl",
+        "../data/msmarco_triplets_5k_20250618_171329.pkl",
+        "../data/msmarco_triplets_88k_20250617_112750.pkl",
         "./data/msmarco_triplets_2k_20250618_171140.pkl",
         "./data/msmarco_triplets_5k_20250618_171329.pkl",
         "./data/msmarco_triplets_88k_20250617_112750.pkl"
@@ -211,8 +214,8 @@ def train_with_wandb(config: Optional[Dict] = None) -> Dict:
     # Try multiple possible locations for embeddings
     possible_paths = [
         os.path.join(cfg.checkpoint_dir, "msmarco_word2vec.pt"),
-        os.path.join(".ben", "checkpoints", "msmarco_word2vec.pt"),
-        os.path.join(os.path.dirname(__file__), "..", "checkpoints", "msmarco_word2vec.pt")
+        os.path.join("./checkpoints", "msmarco_word2vec.pt"),
+        os.path.join(os.path.dirname(__file__), "checkpoints", "msmarco_word2vec.pt")
     ]
     
     embeddings_path = None
@@ -594,8 +597,7 @@ def get_default_config() -> Dict:
     """Get default configuration for training."""
     return {
         # Data
-        "triplets_file": "./data/msmarco_triplets_5000.pkl",
-        "checkpoint_dir": ".ben/checkpoints",
+        "checkpoint_dir": "./checkpoints",
         "evaluation_path": "./evaluation",  # Path to evaluation directory
         
         # Model architecture
@@ -706,8 +708,14 @@ def main():
     """Main function with command line arguments."""
     parser = argparse.ArgumentParser(description="Train two-tower model with W&B")
     parser.add_argument("--triplets-file", 
-                       default="./data/msmarco_triplets_5000.pkl",
-                       help="Path to pre-generated triplets file (.pkl) - default: ./data/msmarco_triplets_5000.pkl")
+                       required=True,
+                       help="Path to pre-generated triplets file (.pkl)")
+    parser.add_argument("--checkpoint-dir", 
+                       default="./checkpoints",
+                       help="Directory to save model checkpoints (default: ./checkpoints)")
+    parser.add_argument("--evaluation-path", 
+                       default="./evaluation",
+                       help="Path to evaluation directory (default: ./evaluation)")
     parser.add_argument("--project", default="two-tower-msmarco",
                        help="W&B project name")
     parser.add_argument("--sweep", action="store_true",
@@ -745,7 +753,8 @@ def main():
         # Override sweep config with fixed values
         fixed_params = {
             "triplets_file": args.triplets_file,
-            "checkpoint_dir": ".ben/checkpoints",
+            "checkpoint_dir": args.checkpoint_dir,
+            "evaluation_path": args.evaluation_path,
             "eval_every_epoch": True,
             "eval_max_queries": 1000,
             "save_best_only": True,
@@ -770,14 +779,20 @@ def main():
         # Single training run
         config = get_default_config()
         
+        # Set mandatory and configurable parameters
+        config["triplets_file"] = args.triplets_file
+        config["checkpoint_dir"] = args.checkpoint_dir
+        config["evaluation_path"] = args.evaluation_path
+        
         # Override with custom config file
         if args.config and os.path.exists(args.config):
             with open(args.config, 'r') as f:
                 custom_config = json.load(f)
             config.update(custom_config)
-        
-        # Override with command line arguments
-        config["triplets_file"] = args.triplets_file
+            # Ensure command line arguments take precedence
+            config["triplets_file"] = args.triplets_file
+            config["checkpoint_dir"] = args.checkpoint_dir
+            config["evaluation_path"] = args.evaluation_path
         
         if args.epochs is not None:
             config["epochs"] = args.epochs
