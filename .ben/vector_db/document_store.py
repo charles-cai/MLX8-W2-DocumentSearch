@@ -404,7 +404,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Create document store from MS MARCO data")
-    parser.add_argument("--data", default="../data", help="Path to MS MARCO data directory")
+    parser.add_argument("--data", default="./data", help="Path to MS MARCO data directory (default: ./data - current directory)")
     parser.add_argument("--db", default="./documents.db", help="Path for SQLite database")
     parser.add_argument("--test", action="store_true", help="Run test queries")
     

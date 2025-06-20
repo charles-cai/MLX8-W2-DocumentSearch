@@ -26,14 +26,45 @@ import wandb
 from train_two_tower_from_triplets import PreprocessedMSMarcoDataset, train_from_triplets
 from two_tower_model import TwoTowerModel, ContrastiveLoss, MarginContrastiveLoss, TripletLoss, TwoTowerCollator
 
-# Import evaluation components
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'evaluation'))
-try:
-    from eval_integration import evaluate_trained_model
-    EVALUATION_AVAILABLE = True
-except ImportError:
-    print("⚠️  Warning: Evaluation module not found. Using fallback evaluation.")
-    EVALUATION_AVAILABLE = False
+# Evaluation module will be imported dynamically based on config
+EVALUATION_AVAILABLE = False
+evaluate_trained_model = None
+
+def setup_evaluation_module(evaluation_path: str = "./evaluation") -> bool:
+    """
+    Dynamically import the evaluation module from the specified path.
+    
+    Args:
+        evaluation_path: Path to the evaluation directory
+        
+    Returns:
+        True if evaluation module was successfully imported, False otherwise
+    """
+    global EVALUATION_AVAILABLE, evaluate_trained_model
+    
+    try:
+        # Add evaluation path to sys.path if not already there
+        abs_eval_path = os.path.abspath(evaluation_path)
+        if abs_eval_path not in sys.path:
+            sys.path.insert(0, abs_eval_path)
+        
+        # Import the evaluation function
+        from eval_integration import evaluate_trained_model as eval_func
+        evaluate_trained_model = eval_func
+        EVALUATION_AVAILABLE = True
+        
+        print(f"✅ Evaluation module loaded from: {evaluation_path}")
+        return True
+        
+    except ImportError as e:
+        print(f"⚠️  Warning: Evaluation module not found at {evaluation_path}. Using fallback evaluation.")
+        print(f"   Import error: {e}")
+        EVALUATION_AVAILABLE = False
+        return False
+    except Exception as e:
+        print(f"⚠️  Warning: Error loading evaluation module from {evaluation_path}: {e}")
+        EVALUATION_AVAILABLE = False
+        return False
     
 def simple_evaluation(model, device, triplets_file, max_queries=100):
     """
@@ -114,9 +145,9 @@ def evaluate_trained_model_wrapper(model, device, epoch, data_path, max_queries)
     # Fallback: use simple evaluation with training data
     # Try to find the triplets file
     possible_triplets = [
-        ".ben/data/msmarco_triplets_2k_20250618_171140.pkl",
-        ".ben/data/msmarco_triplets_5k_20250618_171329.pkl",
-        ".ben/data/msmarco_triplets_88k_20250617_112750.pkl"
+        "./data/msmarco_triplets_2k_20250618_171140.pkl",
+        "./data/msmarco_triplets_5k_20250618_171329.pkl",
+        "./data/msmarco_triplets_88k_20250617_112750.pkl"
     ]
     
     for triplets_file in possible_triplets:
@@ -154,6 +185,9 @@ def train_with_wandb(config: Optional[Dict] = None) -> Dict:
     
     # Get config from wandb (this handles both sweep and manual configs)
     cfg = wandb.config
+    
+    # Setup evaluation module with configurable path
+    setup_evaluation_module(cfg.get('evaluation_path', './evaluation'))
     
     print("🚀 Two-Tower Training with Weights & Biases")
     print("=" * 70)
@@ -429,7 +463,7 @@ def train_with_wandb(config: Optional[Dict] = None) -> Dict:
                     model=model,
                     device=device,
                     epoch=epoch + 1,
-                    data_path=".ben/data",  # Use our data directory
+                    data_path="./data",  # Use current directory's data folder
                     max_queries=cfg.eval_max_queries
                 )
                 
@@ -562,6 +596,7 @@ def get_default_config() -> Dict:
         # Data
         "triplets_file": "./data/msmarco_triplets_5000.pkl",
         "checkpoint_dir": ".ben/checkpoints",
+        "evaluation_path": "./evaluation",  # Path to evaluation directory
         
         # Model architecture
         "hidden_dim": 256,
@@ -672,7 +707,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train two-tower model with W&B")
     parser.add_argument("--triplets-file", 
                        default="./data/msmarco_triplets_5000.pkl",
-                       help="Path to pre-generated triplets file (.pkl)")
+                       help="Path to pre-generated triplets file (.pkl) - default: ./data/msmarco_triplets_5000.pkl")
     parser.add_argument("--project", default="two-tower-msmarco",
                        help="W&B project name")
     parser.add_argument("--sweep", action="store_true",

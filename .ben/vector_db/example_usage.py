@@ -49,7 +49,7 @@ def quick_test_with_small_dataset():
     # Configuration
     redis_config = example_redis_cloud_config()
     checkpoint_path = "../checkpoints/two_tower_best_epoch2_20250619_094155.pt"
-    data_path = "../data"
+    data_path = "./data"
     
     # Test command
     test_command = f"""
@@ -113,7 +113,7 @@ def production_caching_example():
     
     redis_config = example_redis_cloud_config()
     checkpoint_path = "../checkpoints/two_tower_best_epoch2_20250619_094155.pt"
-    data_path = "../data"
+    data_path = "./data"
     
     prod_command = f"""
 cd .ben/vector_db

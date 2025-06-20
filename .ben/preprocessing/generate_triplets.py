@@ -305,7 +305,7 @@ def main():
     """Main function with command line arguments."""
     parser = argparse.ArgumentParser(description="Generate MS MARCO training triplets")
     parser.add_argument("--data-path", default="./data", 
-                       help="Path to data directory (default: ./data)")
+                       help="Path to data directory (default: ./data - current directory)")
     parser.add_argument("--max-samples", type=int, default=None,
                        help="Maximum number of triplets to generate (default: no limit)")
     parser.add_argument("--seed", type=int, default=42,

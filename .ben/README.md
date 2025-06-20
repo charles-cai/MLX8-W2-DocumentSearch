@@ -248,3 +248,66 @@ ls -la checkpoints/two_tower_model_*.pt
 - Caching is enabled by default to speed up subsequent runs
 - Models are saved with timestamps to avoid overwriting
 - Training logs include detailed metrics for analysis 
+
+## 📁 Data Path Configuration
+
+When running scripts from the `.ben` folder, the data path configuration is designed to be consistent and flexible:
+
+### Default Data Path
+- **Default**: `./data` (current directory + data folder)
+- **Location**: When running from `.ben/`, this resolves to `.ben/data/`
+- **Override**: Use `--data` or `--data-path` arguments to specify a different location
+
+### Updated Scripts
+The following scripts have been updated to use `./data` as the default data path:
+
+1. **Vector Database Scripts** (`.ben/vector_db/`):
+   - `example_usage.py` - Example configurations for Redis vector store
+   - `document_store.py` - SQLite document store operations
+
+2. **Training Scripts** (`.ben/training/`):
+   - `train_with_wandb.py` - W&B training with triplets
+   - `two_tower_model.py` - Model definitions and training ✅ (already correct)
+
+3. **Preprocessing Scripts** (`.ben/preprocessing/`):
+   - `generate_triplets.py` - Generate MS MARCO triplets ✅ (already correct)
+
+4. **Evaluation Scripts** (`.ben/evaluation/`):
+   - `ms_marco_evaluator.py` - Model evaluation ✅ (already correct)
+
+### Usage Examples
+
+```bash
+# Run from .ben folder - uses ./data (which is .ben/data)
+cd .ben
+python vector_db/document_store.py
+
+# Override data path if needed
+python vector_db/document_store.py --data ../some_other_data
+
+# Training with default data path
+python training/train_with_wandb.py --triplets-file ./data/msmarco_triplets_5k.pkl
+
+# Generate triplets with custom data path
+python preprocessing/generate_triplets.py --data-path /path/to/custom/data
+```
+
+### Data Directory Structure
+```
+.ben/
+├── data/                                    # ← Default data location
+│   ├── msmarco_validation_eval.pkl
+│   ├── msmarco_triplets_*.pkl
+│   ├── msmarco_raw_data*.pkl
+│   └── processed_texts.pkl
+├── vector_db/
+├── training/
+├── preprocessing/
+└── evaluation/
+```
+
+### Benefits
+- **Consistent**: All scripts use the same `./data` default
+- **Flexible**: Easy to override with command-line arguments
+- **Clear**: Help text indicates default path behavior
+- **Portable**: Works regardless of where you run the scripts from 
