@@ -11,6 +11,7 @@ from logging_utils import setup_logging, with_exception_logging
 import faiss
 import torch
 import torch.nn.functional as F
+import gc
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -222,16 +223,28 @@ class DataProcessing:
             self._store_embeddings(split, w2v_utils)
     
     def _get_seq_embedding(self, w2v_model, vector_size, row_id, query_id, text):
+        """
+        Generate sequence embeddings with memory-efficient processing.
+        """
         tokens = text.lower().split()
         if len(tokens) > self.MAX_TOKEN:
             self.logger.warning(f"#{row_id} query_id {query_id}: text length {len(tokens)} exceeds MAX_TOKEN {self.MAX_TOKEN}")
             tokens = tokens[:self.MAX_TOKEN]
 
-        vectors = [w2v_model[word] for word in tokens if word in w2v_model]
+        # Use generator to avoid creating intermediate list
+        vectors = []
+        for word in tokens:
+            if word in w2v_model:
+                vectors.append(w2v_model[word].astype(np.float32))
+        
         if not vectors:
-            return [np.zeros(vector_size, dtype=np.float32)]
-        return [vec.astype(np.float32) for vec in vectors]
-
+            result = [np.zeros(vector_size, dtype=np.float32)]
+        else:
+            result = vectors
+        
+        # Clear intermediate data
+        del vectors
+        return result
 
     def _store_embeddings(self, split, w2v_utils):
         """
@@ -259,16 +272,38 @@ class DataProcessing:
         w2v_model = w2v_utils.w2v_model
         vector_size = w2v_model.vector_size
 
-        for idx, row in tqdm(df.iterrows(), total=len(df), desc="Embedding rows"):
-            query_embs.append(w2v_utils.embedding(row["query"]))
-            pos_embs.append(w2v_utils.embedding(row["positive_doc"]))
-            neg_embs.append(w2v_utils.embedding(row["negative_doc"]))
-            query_id = row["query_id"]
+        # Process in smaller chunks to manage memory for sequence embeddings
+        chunk_size = 100  # Process 100 rows at a time for sequence embeddings
+        total_rows = len(df)
+        
+        for chunk_start in range(0, total_rows, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, total_rows)
+            
+            for idx in range(chunk_start, chunk_end):
+                row = df.iloc[idx]
+                
+                # Regular embeddings (averaged)
+                query_embs.append(w2v_utils.embedding(row["query"]))
+                pos_embs.append(w2v_utils.embedding(row["positive_doc"]))
+                neg_embs.append(w2v_utils.embedding(row["negative_doc"]))
+                
+                query_id = row["query_id"]
 
-            # Sequence embeddings
-            query_embs_seq.append(self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["query"]))
-            pos_doc_embs_seq.append(self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["positive_doc"]))
-            neg_doc_embs_seq.append(self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["negative_doc"]))
+                # Sequence embeddings with memory management
+                query_seq = self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["query"])
+                pos_seq = self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["positive_doc"])
+                neg_seq = self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["negative_doc"])
+                
+                query_embs_seq.append(query_seq)
+                pos_doc_embs_seq.append(pos_seq)
+                neg_doc_embs_seq.append(neg_seq)
+                
+                # Clear intermediate variables
+                del query_seq, pos_seq, neg_seq
+            
+            # Force garbage collection every chunk
+            if chunk_end % (chunk_size * 10) == 0:  # Every 10 chunks
+                gc.collect()
 
         # Convert to numpy arrays
         query_embs = np.stack(query_embs)
@@ -284,6 +319,11 @@ class DataProcessing:
         df["query_emb_seq"] = query_embs_seq
         df["positive_doc_emb_seq"] = pos_doc_embs_seq
         df["negative_doc_emb_seq"] = neg_doc_embs_seq
+
+        # Clear intermediate lists before saving
+        del query_embs, pos_embs, neg_embs
+        del query_embs_seq, pos_doc_embs_seq, neg_doc_embs_seq
+        gc.collect()
 
         triple_embedding_path = os.path.join(self.MLX_DATASET_OUTPUT_DIR, f"{split}_triples_embeddings.parquet")
         self.logger.info(f"Saving embeddings to {triple_embedding_path}")
