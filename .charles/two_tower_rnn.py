@@ -9,6 +9,8 @@ from logging_utils import setup_logging
 import pandas as pd
 import numpy as np
 import faiss
+import gc
+from word2vec_utils import Word2vecUtils
 
 load_dotenv()
 
@@ -69,10 +71,11 @@ class TwoTowerRNN:
         self.LEARNING_RATE = float(os.getenv("LEARNING_RATE", 1e-3))
         self.MARGIN = float(os.getenv("MARGIN", 0.15))
         self.TOP_K = int(os.getenv("TOP_K", 10))
+        self.MAX_TOKEN = int(os.getenv("MAX_TOKEN", 256))
 
-        self.TRIPLES_EMBEDDINGS_DATA_PATH_TRAIN = os.path.join(self.MLX_DATASET_OUTPUT_DIR, "train_triples_embeddings.parquet")
-        self.TRIPLES_EMBEDDINGS_DATA_PATH_VALIDATION = os.path.join(self.MLX_DATASET_OUTPUT_DIR,  "validation_triples_embeddings.parquet")
-        self.TRIPLES_EMBEDDINGS_DATA_PATH_TEST = os.path.join(self.MLX_DATASET_OUTPUT_DIR,  "test_triples_embeddings.parquet")
+        self.TRIPLES_DATA_PATH_TRAIN = os.path.join(self.MLX_DATASET_OUTPUT_DIR, "train_triples.parquet")
+        self.TRIPLES_DATA_PATH_VALIDATION = os.path.join(self.MLX_DATASET_OUTPUT_DIR,  "validation_triples.parquet")
+        self.TRIPLES_DATA_PATH_TEST = os.path.join(self.MLX_DATASET_OUTPUT_DIR,  "test_triples.parquet")
     
         self.WANDB_PROJECT = os.getenv("WANDB_PROJECT", "mlx8-week2-document-search")
         self.WANDB_RUN_NAME2 = os.getenv("WANDB_RUN_NAME2", "two-tower-rnn")
@@ -85,18 +88,62 @@ class TwoTowerRNN:
         self.logger.info(f"BATCH_SIZE: {self.BATCH_SIZE}")
         self.logger.info(f"LEARNING_RATE: {self.LEARNING_RATE}")
         self.logger.info(f"MARGIN: {self.MARGIN}")
-        self.logger.info(f"TRIPLES_EMBEDDINGS_DATA_PATH_TRAIN: {self.TRIPLES_EMBEDDINGS_DATA_PATH_TRAIN}")
-        self.logger.info(f"TRIPLES_EMBEDDINGS_DATA_PATH_VALIDATION: {self.TRIPLES_EMBEDDINGS_DATA_PATH_VALIDATION}")
-        self.logger.info(f"TRIPLES_EMBEDDINGS_DATA_PATH_TEST: {self.TRIPLES_EMBEDDINGS_DATA_PATH_TEST}")
+        self.logger.info(f"MAX_TOKEN: {self.MAX_TOKEN}")
+        self.logger.info(f"TRIPLES_DATA_PATH_TRAIN: {self.TRIPLES_DATA_PATH_TRAIN}")
+        self.logger.info(f"TRIPLES_DATA_PATH_VALIDATION: {self.TRIPLES_DATA_PATH_VALIDATION}")
+        self.logger.info(f"TRIPLES_DATA_PATH_TEST: {self.TRIPLES_DATA_PATH_TEST}")
         self.logger.info(f"WANDB_PROJECT: {self.WANDB_PROJECT}")
         self.logger.info(f"WANDB_RUN_NAME2: {self.WANDB_RUN_NAME2}")
         self.logger.info(f"TWO_TOWER_RNN_MODEL_PATH: {self.TWO_TOWER_RNN_MODEL_PATH}")
 
-        self.qry_tower = QryTower()
-        self.doc_tower = DocTower()
+        # Initialize Word2Vec utils
+        self.logger.info("Loading Word2Vec model...")
+        self.w2v_utils = Word2vecUtils()
+        if self.w2v_utils.w2v_model is None:
+            self.w2v_utils.load_word2vec()
+        self.w2v_model = self.w2v_utils.w2v_model
+        self.vector_size = self.w2v_model.vector_size
+
+        self.qry_tower = QryTower(input_dim=self.vector_size)
+        self.doc_tower = DocTower(input_dim=self.vector_size)
         
         # Initialize faiss configuration
         self._setup_faiss()
+
+    def _get_seq_embedding(self, row_id, query_id, text):
+        """
+        Generate sequence embeddings with memory-efficient processing.
+        """
+        tokens = text.lower().split()
+        if len(tokens) > self.MAX_TOKEN:
+            self.logger.warning(f"#{row_id} query_id {query_id}: text length {len(tokens)} exceeds MAX_TOKEN {self.MAX_TOKEN}")
+            tokens = tokens[:self.MAX_TOKEN]
+
+        # Use generator to avoid creating intermediate list
+        vectors = []
+        for word in tokens:
+            if word in self.w2v_model:
+                vectors.append(self.w2v_model[word].astype(np.float32))
+        
+        if not vectors:
+            result = [np.zeros(self.vector_size, dtype=np.float32)]
+        else:
+            result = vectors
+        
+        # Clear intermediate data
+        del vectors
+        return result
+
+    def _generate_batch_embeddings(self, texts, batch_start_idx):
+        """
+        Generate sequence embeddings for a batch of texts
+        """
+        batch_embeddings = []
+        for i, text in enumerate(texts):
+            row_id = batch_start_idx + i
+            seq_emb = self._get_seq_embedding(row_id, "batch", text)
+            batch_embeddings.append(seq_emb)
+        return batch_embeddings
 
     def _setup_faiss(self):
         """Setup faiss for GPU or CPU usage"""
@@ -166,6 +213,7 @@ class TwoTowerRNN:
             "BATCH_SIZE": self.BATCH_SIZE,
             "LEARNING_RATE": self.LEARNING_RATE,
             "MARGIN": self.MARGIN,
+            "MAX_TOKEN": self.MAX_TOKEN,
         })
 
         optimizer = torch.optim.Adam(
@@ -173,16 +221,13 @@ class TwoTowerRNN:
             lr=self.LEARNING_RATE
         )
 
-        df_validation = pd.read_parquet(self.TRIPLES_EMBEDDINGS_DATA_PATH_VALIDATION)
-        df_test = pd.read_parquet(self.TRIPLES_EMBEDDINGS_DATA_PATH_TEST)
+        df_validation = pd.read_parquet(self.TRIPLES_DATA_PATH_VALIDATION)
+        df_test = pd.read_parquet(self.TRIPLES_DATA_PATH_TEST)
 
         # Load training data from parquet
-        self.logger.info(f"Loading training data from {self.TRIPLES_EMBEDDINGS_DATA_PATH_TRAIN}")
-        df = pd.read_parquet(self.TRIPLES_EMBEDDINGS_DATA_PATH_TRAIN)
+        self.logger.info(f"Loading training data from {self.TRIPLES_DATA_PATH_TRAIN}")
+        df = pd.read_parquet(self.TRIPLES_DATA_PATH_TRAIN)
 
-        qry_seq = df["query_emb_seq"].values
-        pos_seq = df["positive_doc_emb_seq"].values
-        neg_seq = df["negative_doc_emb_seq"].values
         num_samples = len(df)
         self.logger.warning(f"Loaded {num_samples} samples for training")
 
@@ -198,9 +243,12 @@ class TwoTowerRNN:
         for epoch in tqdm(range(self.NUM_EPOCHS), desc="Epochs"):
             epoch_loss = 0.0
             for i in tqdm(range(0, num_samples, self.BATCH_SIZE), desc=f"Epoch {epoch+1}/{self.NUM_EPOCHS}", total=total_batches):
-                batch_qry_seq = qry_seq[i:i+self.BATCH_SIZE]
-                batch_pos_seq = pos_seq[i:i+self.BATCH_SIZE]
-                batch_neg_seq = neg_seq[i:i+self.BATCH_SIZE]
+                batch_df = df.iloc[i:i+self.BATCH_SIZE]
+                
+                # Generate embeddings on-the-fly
+                batch_qry_seq = self._generate_batch_embeddings(batch_df["query"].values, i)
+                batch_pos_seq = self._generate_batch_embeddings(batch_df["positive_doc"].values, i)
+                batch_neg_seq = self._generate_batch_embeddings(batch_df["negative_doc"].values, i)
 
                 batch_qry = pad_batch(batch_qry_seq)
                 batch_pos = pad_batch(batch_pos_seq)
@@ -224,6 +272,11 @@ class TwoTowerRNN:
                 # wandb logging per batch
                 wandb.log({"batch_loss": loss.item(), "epoch": epoch+1})
 
+                # Clear batch data to free memory
+                del batch_qry_seq, batch_pos_seq, batch_neg_seq
+                del batch_qry, batch_pos, batch_neg
+                gc.collect()
+
             avg_loss = epoch_loss / num_samples
             self.logger.info(f"Epoch {epoch+1}: avg_loss = {avg_loss:.4f}")
             wandb.log({"epoch_loss": avg_loss, "epoch": epoch+1})
@@ -245,9 +298,6 @@ class TwoTowerRNN:
     def compute_precision_recall_at_k(self, epoch, qry_tower, doc_tower, top_k, df, split):
         self.logger.info(f"Computing precision@{top_k} and recall@{top_k} for {split} split")
 
-        query_embeddings_seq = df["query_emb_seq"].values
-        doc_embeddings_seq = df["positive_doc_emb_seq"].values
-        
         def pad_batch(batch_seq):
             batch_tensors = [torch.tensor(s, dtype=torch.float32) for s in batch_seq]
             padded = torch.nn.utils.rnn.pad_sequence(batch_tensors, batch_first=True, padding_value=0.0)
@@ -256,19 +306,29 @@ class TwoTowerRNN:
         # Transform all query and doc embeddings using the towers
         with torch.no_grad():
             qry_tower_emb_list = []
-            for i in tqdm(range(0, len(query_embeddings_seq), self.BATCH_SIZE), desc=f"Embedding {split} queries"):
-                batch_seq = query_embeddings_seq[i:i+self.BATCH_SIZE]
-                padded_batch = pad_batch(batch_seq)
+            for i in tqdm(range(0, len(df), self.BATCH_SIZE), desc=f"Embedding {split} queries"):
+                batch_df = df.iloc[i:i+self.BATCH_SIZE]
+                batch_qry_seq = self._generate_batch_embeddings(batch_df["query"].values, i)
+                padded_batch = pad_batch(batch_qry_seq)
                 batch_emb = qry_tower(padded_batch).cpu().numpy()
                 qry_tower_emb_list.append(batch_emb)
+                
+                # Clear batch data
+                del batch_qry_seq, padded_batch
+                gc.collect()
             qry_tower_emb = np.vstack(qry_tower_emb_list)
 
             doc_tower_emb_list = []
-            for i in tqdm(range(0, len(doc_embeddings_seq), self.BATCH_SIZE), desc=f"Embedding {split} documents"):
-                batch_seq = doc_embeddings_seq[i:i+self.BATCH_SIZE]
-                padded_batch = pad_batch(batch_seq)
+            for i in tqdm(range(0, len(df), self.BATCH_SIZE), desc=f"Embedding {split} documents"):
+                batch_df = df.iloc[i:i+self.BATCH_SIZE]
+                batch_doc_seq = self._generate_batch_embeddings(batch_df["positive_doc"].values, i)
+                padded_batch = pad_batch(batch_doc_seq)
                 batch_emb = doc_tower(padded_batch).cpu().numpy()
                 doc_tower_emb_list.append(batch_emb)
+                
+                # Clear batch data
+                del batch_doc_seq, padded_batch
+                gc.collect()
             doc_tower_emb = np.vstack(doc_tower_emb_list)
         
         # Build faiss index using transformed doc embeddings (128-dim)

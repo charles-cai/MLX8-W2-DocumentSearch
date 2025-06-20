@@ -264,46 +264,20 @@ class DataProcessing:
         pos_embs = []
         neg_embs = []
 
-        # Add lists for sequence embeddings
-        query_embs_seq = []
-        pos_doc_embs_seq = []
-        neg_doc_embs_seq = []
-
         w2v_model = w2v_utils.w2v_model
         vector_size = w2v_model.vector_size
 
-        # Process in smaller chunks to manage memory for sequence embeddings
-        chunk_size = 100  # Process 100 rows at a time for sequence embeddings
+        # Process rows with tqdm progress bar
         total_rows = len(df)
         
-        for chunk_start in range(0, total_rows, chunk_size):
-            chunk_end = min(chunk_start + chunk_size, total_rows)
+        # Add tqdm for overall progress
+        for idx in tqdm(range(total_rows), desc=f"Computing embeddings for {split}"):
+            row = df.iloc[idx]
             
-            for idx in range(chunk_start, chunk_end):
-                row = df.iloc[idx]
-                
-                # Regular embeddings (averaged)
-                query_embs.append(w2v_utils.embedding(row["query"]))
-                pos_embs.append(w2v_utils.embedding(row["positive_doc"]))
-                neg_embs.append(w2v_utils.embedding(row["negative_doc"]))
-                
-                query_id = row["query_id"]
-
-                # Sequence embeddings with memory management
-                query_seq = self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["query"])
-                pos_seq = self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["positive_doc"])
-                neg_seq = self._get_seq_embedding(w2v_model, vector_size, idx, query_id, row["negative_doc"])
-                
-                query_embs_seq.append(query_seq)
-                pos_doc_embs_seq.append(pos_seq)
-                neg_doc_embs_seq.append(neg_seq)
-                
-                # Clear intermediate variables
-                del query_seq, pos_seq, neg_seq
-            
-            # Force garbage collection every chunk
-            if chunk_end % (chunk_size * 10) == 0:  # Every 10 chunks
-                gc.collect()
+            # Regular embeddings (averaged)
+            query_embs.append(w2v_utils.embedding(row["query"]))
+            pos_embs.append(w2v_utils.embedding(row["positive_doc"]))
+            neg_embs.append(w2v_utils.embedding(row["negative_doc"]))
 
         # Convert to numpy arrays
         query_embs = np.stack(query_embs)
@@ -315,14 +289,8 @@ class DataProcessing:
         df["positive_doc_emb"] = list(pos_embs)
         df["negative_doc_emb"] = list(neg_embs)
 
-        # Add sequence embeddings to DataFrame
-        df["query_emb_seq"] = query_embs_seq
-        df["positive_doc_emb_seq"] = pos_doc_embs_seq
-        df["negative_doc_emb_seq"] = neg_doc_embs_seq
-
         # Clear intermediate lists before saving
         del query_embs, pos_embs, neg_embs
-        del query_embs_seq, pos_doc_embs_seq, neg_doc_embs_seq
         gc.collect()
 
         triple_embedding_path = os.path.join(self.MLX_DATASET_OUTPUT_DIR, f"{split}_triples_embeddings.parquet")
