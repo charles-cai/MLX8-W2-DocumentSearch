@@ -32,7 +32,7 @@
             "args": ["--embedding"]
         },
         {
-            "name": "two_tower_tiny",
+            "name": "two_tower_tiny - Training",
             "type": "debugpy",
             "request": "launch",
             "program": "uv",
@@ -41,13 +41,22 @@
             "args": ["run", "two_tower_tiny.py"]
         },
         {
-            "name": "two_tower_rnn",
+            "name": "two_tower_rnn - Training",
             "type": "debugpy",
             "request": "launch",
             "program": "uv",
             "cwd": "${workspaceFolder}/.charles",
             "console": "integratedTerminal",
             "args": ["run", "two_tower_rnn.py"]
+        },
+        {
+            "name": "inference_test - Inference/Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "uv",
+            "cwd": "${workspaceFolder}/.charles",
+            "console": "integratedTerminal",
+            "args": ["run", "inference_test.py"]
         }
     ]
 }
