@@ -1,0 +1,5 @@
+# .maria/.gitignore or .gitignore
+*.pt
+*.pkl
+*.npy
+*.index
