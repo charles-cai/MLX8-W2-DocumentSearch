@@ -166,22 +166,49 @@ class CheckpointAnalyzer:
             checkpoint_match['metrics'] = {}
             checkpoint_match['training_history'] = None
             
-            # Try to match by timestamp or sweep name
+            # Extract checkpoint name without extension
+            checkpoint_name = checkpoint['filename'].replace('.pt', '')
+            
+            # Try to match by exact checkpoint name first
             for history in training_histories:
                 if not history:
                     continue
                 
-                # Simple matching by date proximity
+                # Check if this history file is for this specific checkpoint
                 history_file = Path(history['path'])
-                history_time = datetime.fromtimestamp(history_file.stat().st_mtime)
+                history_filename = history_file.name
                 
-                time_diff = abs((checkpoint['modified'] - history_time).total_seconds())
-                
-                # If files are within 6 hours of each other, likely related
-                if time_diff < 21600:  # 6 hours in seconds
+                # Look for training_history_<checkpoint_name>.json pattern
+                if history_filename.startswith(f"training_history_{checkpoint_name}"):
                     checkpoint_match['metrics'] = history['metrics']
                     checkpoint_match['training_history'] = history['file']
                     break
+                
+                # Also check if the history contains the checkpoint path
+                if 'checkpoint_path' in history.get('metrics', {}):
+                    history_checkpoint_path = history['metrics']['checkpoint_path']
+                    if checkpoint_name in history_checkpoint_path:
+                        checkpoint_match['metrics'] = history['metrics']
+                        checkpoint_match['training_history'] = history['file']
+                        break
+            
+            # If no exact match found, try timestamp proximity as fallback
+            if not checkpoint_match['metrics']:
+                for history in training_histories:
+                    if not history:
+                        continue
+                    
+                    # Simple matching by date proximity
+                    history_file = Path(history['path'])
+                    history_time = datetime.fromtimestamp(history_file.stat().st_mtime)
+                    
+                    time_diff = abs((checkpoint['modified'] - history_time).total_seconds())
+                    
+                    # If files are within 6 hours of each other, likely related
+                    if time_diff < 21600:  # 6 hours in seconds
+                        checkpoint_match['metrics'] = history['metrics']
+                        checkpoint_match['training_history'] = history['file']
+                        break
             
             matched.append(checkpoint_match)
         
@@ -272,8 +299,11 @@ class CheckpointAnalyzer:
         print(f"📁 Total checkpoints: {analysis['total_checkpoints']}")
         print(f"📈 Checkpoints with metrics: {analysis['checkpoints_with_metrics']}")
         
+        # Table header with extra metrics
         print(f"\n🥇 TOP {top_n} CHECKPOINTS:")
-        print("-" * 80)
+        print("-" * 120)
+        print(f"{'#':<3} {'Checkpoint':<40} {analysis['metric_used']:<8} {'Recall@1':<8} {'Recall@5':<8} {'Recall@10':<10} {'Size(MB)':<9} {'Modified':<17}")
+        print("-" * 120)
         
         for i, checkpoint in enumerate(analysis['ranked_checkpoints'][:top_n]):
             rank = checkpoint['rank']
@@ -281,24 +311,18 @@ class CheckpointAnalyzer:
             metric_value = checkpoint['metric_value']
             size_mb = checkpoint['size_mb']
             modified = checkpoint['modified'].strftime("%Y-%m-%d %H:%M")
-            
-            # Add special indicator for known best
+            metrics = checkpoint.get('metrics', {})
+            recall1 = metrics.get('Recall@1', 0)
+            recall5 = metrics.get('Recall@5', 0)
+            recall10 = metrics.get('Recall@10', 0)
             best_indicator = " ⭐ KNOWN BEST" if checkpoint.get('is_known_best') else ""
-            
-            print(f"{rank:2d}. {filename}{best_indicator}")
-            print(f"    📈 {analysis['metric_used']}: {metric_value:.4f}")
-            print(f"    💾 Size: {size_mb}MB | 📅 Modified: {modified}")
-            
+            print(f"{rank:<3} {filename:<40}{best_indicator:<2} {metric_value:<8.4f} {recall1:<8.4f} {recall5:<8.4f} {recall10:<10.4f} {size_mb:<9.1f} {modified:<17}")
             if checkpoint.get('training_history'):
                 print(f"    📋 Training history: {checkpoint['training_history']}")
-            
             if checkpoint.get('sweep_name'):
                 print(f"    🔄 Sweep: {checkpoint['sweep_name']}")
-            
-            # Show source of metrics
             if checkpoint.get('metrics', {}).get('source'):
                 print(f"    🔍 Source: {checkpoint['metrics']['source']}")
-            
             print()
         
         # Show best checkpoint details
