@@ -229,3 +229,6 @@ dump.rdb
 **/documents.db
 # Generated embedding files (can be regenerated)
 .ben/checkpoints/msmarco_word2vec.pt
+
+# UV lock file (can be regenerated)
+uv.lock
