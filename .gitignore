@@ -203,6 +203,8 @@ wandb/
 **/redis_config.json
 redis_config.json
 
+# Evaluation results and history files
+.ben/evaluation/*.json
 
 # Python cache and compiled files
 __pycache__/
