@@ -102,7 +102,113 @@ DESCRIBE  '.data/processed/validation_triples.parquet';
 SELECT * FROM '.data/processed/test_triples.parquet' LIMIT 10;
 SELECT COUNT(*) FROM '.data/processed/test_triples.parquet' LIMIT 10;
 DESCRIBE  '.data/processed/test_triples.parquet'; 
+    
+-- String Length Analysis for Train Dataset
+SELECT 
+    'train' as dataset,
+    AVG(LENGTH(query)) as avg_query_length,
+    MIN(LENGTH(query)) as min_query_length,
+    MAX(LENGTH(query)) as max_query_length,
+    AVG(LENGTH(positive_doc)) as avg_positive_doc_length,
+    MIN(LENGTH(positive_doc)) as min_positive_doc_length,
+    MAX(LENGTH(positive_doc)) as max_positive_doc_length,
+    AVG(LENGTH(negative_doc)) as avg_negative_doc_length,
+    MIN(LENGTH(negative_doc)) as min_negative_doc_length,
+    MAX(LENGTH(negative_doc)) as max_negative_doc_length
+FROM '.data/processed/train_triples.parquet';
 
+-- String Length Analysis for Validation Dataset
+SELECT 
+    'validation' as dataset,
+    AVG(LENGTH(query)) as avg_query_length,
+    MIN(LENGTH(query)) as min_query_length,
+    MAX(LENGTH(query)) as max_query_length,
+    AVG(LENGTH(positive_doc)) as avg_positive_doc_length,
+    MIN(LENGTH(positive_doc)) as min_positive_doc_length,
+    MAX(LENGTH(positive_doc)) as max_positive_doc_length,
+    AVG(LENGTH(negative_doc)) as avg_negative_doc_length,
+    MIN(LENGTH(negative_doc)) as min_negative_doc_length,
+    MAX(LENGTH(negative_doc)) as max_negative_doc_length
+FROM '.data/processed/validation_triples.parquet';
+
+-- String Length Analysis for Test Dataset
+SELECT 
+    'test' as dataset,
+    AVG(LENGTH(query)) as avg_query_length,
+    MIN(LENGTH(query)) as min_query_length,
+    MAX(LENGTH(query)) as max_query_length,
+    AVG(LENGTH(positive_doc)) as avg_positive_doc_length,
+    MIN(LENGTH(positive_doc)) as min_positive_doc_length,
+    MAX(LENGTH(positive_doc)) as max_positive_doc_length,
+    AVG(LENGTH(negative_doc)) as avg_negative_doc_length,
+    MIN(LENGTH(negative_doc)) as min_negative_doc_length,
+    MAX(LENGTH(negative_doc)) as max_negative_doc_length
+FROM '.data/processed/test_triples.parquet';
+
+-- Word Count Analysis (approximate using space splits)
+SELECT 
+    'train' as dataset,
+    AVG(LENGTH(query) - LENGTH(REPLACE(query, ' ', '')) + 1) as avg_query_words,
+    AVG(LENGTH(positive_doc) - LENGTH(REPLACE(positive_doc, ' ', '')) + 1) as avg_positive_doc_words,
+    AVG(LENGTH(negative_doc) - LENGTH(REPLACE(negative_doc, ' ', '')) + 1) as avg_negative_doc_words
+FROM '.data/processed/train_triples.parquet';
+
+-- Distribution of string lengths (buckets)
+SELECT 
+    CASE 
+        WHEN LENGTH(query) <= 50 THEN '0-50'
+        WHEN LENGTH(query) <= 100 THEN '51-100'
+        WHEN LENGTH(query) <= 200 THEN '101-200'
+        WHEN LENGTH(query) <= 500 THEN '201-500'
+        ELSE '500+' 
+    END as query_length_bucket,
+    COUNT(*) as count
+FROM '.data/processed/train_triples.parquet'
+GROUP BY query_length_bucket
+ORDER BY query_length_bucket;
+
+-- Document length distribution
+SELECT 
+    CASE 
+        WHEN LENGTH(positive_doc) <= 500 THEN '0-500'
+        WHEN LENGTH(positive_doc) <= 1000 THEN '501-1000'
+        WHEN LENGTH(positive_doc) <= 2000 THEN '1001-2000'
+        WHEN LENGTH(positive_doc) <= 5000 THEN '2001-5000'
+        ELSE '5000+' 
+    END as doc_length_bucket,
+    COUNT(*) as count
+FROM '.data/processed/train_triples.parquet'
+GROUP BY doc_length_bucket
+ORDER BY doc_length_bucket;
+
+-- Sample long and short texts for inspection
+SELECT 'SHORT_QUERY' as type, query, LENGTH(query) as length 
+FROM '.data/processed/train_triples.parquet' 
+WHERE LENGTH(query) < 20 
+LIMIT 5;
+
+SELECT 'LONG_QUERY' as type, query, LENGTH(query) as length 
+FROM '.data/processed/train_triples.parquet' 
+WHERE LENGTH(query) > 200 
+LIMIT 5;
+
+SELECT 'SHORT_DOC' as type, positive_doc, LENGTH(positive_doc) as length 
+FROM '.data/processed/train_triples.parquet' 
+WHERE LENGTH(positive_doc) < 100 
+LIMIT 3;
+
+SELECT 'LONG_DOC' as type, positive_doc, LENGTH(positive_doc) as length 
+FROM '.data/processed/train_triples.parquet' 
+WHERE LENGTH(positive_doc) > 3000 
+LIMIT 3;
+
+-- Memory usage estimation (approximate)
+SELECT 
+    'train' as dataset,
+    COUNT(*) as total_records,
+    SUM(LENGTH(query) + LENGTH(positive_doc) + LENGTH(negative_doc)) as total_text_bytes,
+    ROUND(SUM(LENGTH(query) + LENGTH(positive_doc) + LENGTH(negative_doc)) / 1024.0 / 1024.0, 2) as total_text_mb
+FROM '.data/processed/train_triples.parquet';
 
 --
 -- ┌────────┬───────┬──────────────┬───────┐

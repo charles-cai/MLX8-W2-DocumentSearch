@@ -30,6 +30,24 @@
             "cwd": "${workspaceFolder}/.charles",
             "console": "integratedTerminal",
             "args": ["--embedding"]
+        },
+        {
+            "name": "two_tower_tiny",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "uv",
+            "cwd": "${workspaceFolder}/.charles",
+            "console": "integratedTerminal",
+            "args": ["run", "two_tower_tiny.py"]
+        },
+        {
+            "name": "two_tower_rnn",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "uv",
+            "cwd": "${workspaceFolder}/.charles",
+            "console": "integratedTerminal",
+            "args": ["run", "two_tower_rnn.py"]
         }
     ]
 }

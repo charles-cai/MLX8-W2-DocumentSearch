@@ -28,6 +28,7 @@ class DataProcessing:
         self.HF_DATASET_VERSION = os.getenv("HF_DATASET_VERSION", "v1.1")
         self.HF_DATASET_OUTPUT_DIR = os.getenv("HF_DATASET_OUTPUT_DIR", "./.data")
         self.MLX_DATASET_OUTPUT_DIR = os.getenv("MLX_DATASET_OUTPUT_DIR", "./.data/processed")
+        self.MAX_TOKEN = int(os.getenv("MAX_TOKEN", "256"))
     
         splits_str = os.getenv("HF_DATASET_SPLITS", "train,validation,test")
         self.HF_DATASET_SPLITS = [s.strip() for s in splits_str.split(",")]
@@ -38,6 +39,7 @@ class DataProcessing:
         self.logger.warning(f"HF Output directory: {self.HF_DATASET_OUTPUT_DIR}")
         self.logger.warning(f"MLX Output directory: {self.MLX_DATASET_OUTPUT_DIR}")
         self.logger.warning(f"BASE Output directory: {self.BASE_OUTPUT_DIR}")
+        self.logger.warning(f"MAX_TOKEN limit: {self.MAX_TOKEN}")
 
     def download_and_save(self):
         self.logger.info(f"Starting download_and_save...")
@@ -247,6 +249,8 @@ class DataProcessing:
 
         def get_seq_embedding(text):
             tokens = text.lower().split()
+            # Limit tokens to MAX_TOKEN
+            tokens = tokens[:self.MAX_TOKEN]
             vectors = [w2v_model[word] for word in tokens if word in w2v_model]
             if not vectors:
                 return [np.zeros(vector_size, dtype=np.float32)]

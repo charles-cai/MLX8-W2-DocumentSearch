@@ -47,7 +47,8 @@ apt install locales -y
 source ~/.bashrc
 
 uv sync
-source .venv/bin/activate
+# source .venv/bin/activate 
+# we use uv run xxx.py instead of python xxx.py
 
 echo "Setup complete - virtual environment activated. You can now run Python scripts directly."
 echo "Run 'git lfs pull' to download large files."
@@ -55,4 +56,7 @@ echo "Run 'git lfs pull' to download large files."
 which python
 which uv
 
-echo "!!Please cp .env.example to .env, and edit with your API_Keys!!"
+echo "!!Please finish the following tasks!!"
+echo "cp .env.example to .env, and edit with your API_Keys!!"
+echo "git config --global user.name 'Your Name'"
+echo "git config --global user.email 'Your Email'"
