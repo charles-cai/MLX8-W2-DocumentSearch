@@ -230,5 +230,7 @@ dump.rdb
 # Generated embedding files (can be regenerated)
 .ben/checkpoints/msmarco_word2vec.pt
 
-# UV lock file (can be regenerated)
+# uv
+#   Similar to other lock files, uv.lock can be ignored for libraries but should be committed
+#   for applications to ensure reproducible builds
 uv.lock
