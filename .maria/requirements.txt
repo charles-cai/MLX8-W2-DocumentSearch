@@ -1,0 +1,8 @@
+torch
+nltk
+numpy
+scikit-learn
+datasets
+streamlit
+wandb
+faiss-cpu
