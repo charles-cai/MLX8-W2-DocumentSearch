@@ -405,10 +405,15 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Create document store from MS MARCO data")
     parser.add_argument("--data", default="./data", help="Path to MS MARCO data directory (default: ./data - current directory)")
-    parser.add_argument("--db", default="./documents.db", help="Path for SQLite database")
+    parser.add_argument("--db", "--database", default="./documents.db", 
+                       help="Path for SQLite database file (default: ./documents.db in current directory)")
     parser.add_argument("--test", action="store_true", help="Run test queries")
     
     args = parser.parse_args()
+    
+    # Show where the database will be created
+    db_absolute_path = os.path.abspath(args.db)
+    logger.info(f"📂 Database location: {db_absolute_path}")
     
     # Create document store
     doc_store = create_document_store_from_pickle(args.data, args.db)
