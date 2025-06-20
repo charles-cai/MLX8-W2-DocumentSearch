@@ -46,17 +46,10 @@ class DataProcessing:
         
         # Check if file already exists using existing method
         for split in self.HF_DATASET_SPLITS:
-            parquet_file_path = self._check_raw_parquet_file(split)
+            exists, parquet_file_path = self._check_raw_parquet_file(split)
 
-            if parquet_file_path is not None:
-                self.logger.warning(f"{split} File already exists in {parquet_file_path}")
-                response = input(f"Overwrite existing {split}.parquet file? [Y/n]: ").strip().lower()
-                if response in ['n', 'no', 'N']:
-                    self.logger.info(f"Skipping download for {split} split")
-                    continue
-                elif response not in ['y', 'yes', 'Y']:
-                    self.logger.error(f"Invaid response {response}', skipping downlad for {split} split.")
-                    return 
+            if exists and not self._human_confirm(f"Overwrite existing {split}.parquet file? [Y/n]: "): 
+                continue
             
             dataset = load_dataset(
                 f"{self.HF_ORGANIZATION}/{self.HF_DATASET}",
@@ -70,22 +63,35 @@ class DataProcessing:
 
             self.logger.success(f"Successfully saved {split} dataset ({len(dataset)} records)")
             self.logger.info(f"Completed download_and_save for split: {split}")
-       
+
+    def _human_confirm(self, message):
+        """
+        Helper method to confirm user input for overwriting files.
+        Returns True if user confirms, False otherwise.
+        """
+        response = input(f"{message} [Y/n]: ").strip().lower()
+        if response in ['y', 'yes', 'Y']:
+            return True
+        elif response in ['n', 'no', 'N']:
+            return False
+        else:
+            self.logger.error(f"Invalid response '{response}', please enter 'Y' or 'N'.")
+            return self._human_confirm(message)
+
     def _check_raw_parquet_file(self, split):
         """
         Check if parquet file exists for the given split.
-        Returns the file path if exists, raises FileNotFoundError if not.
+        Returns tuple (exists, file_path).
         """
 
         base_output_dir = os.path.join(self.HF_DATASET_OUTPUT_DIR, f"{self.HF_DATASET}_{self.HF_DATASET_VERSION}")
         parquet_file_path = os.path.join(base_output_dir, f"{split}.parquet")
 
-        if not os.path.exists(parquet_file_path):
-            self.logger.error(f"Parquet file not found: {parquet_file_path}")
-            raise FileNotFoundError(f"Parquet file not found: {parquet_file_path}")
-        
-        self.logger.warning(f"Parquet file found: {parquet_file_path}")
-        return parquet_file_path
+        exists = os.path.exists(parquet_file_path)
+        if not exists:
+            self.logger.warning(f"Parquet file not found: {parquet_file_path}")
+
+        return exists, parquet_file_path
     
     def gen_triples_all(self):
         """
@@ -105,7 +111,7 @@ class DataProcessing:
         """
         self.logger.info(f"Starting gen_triples for {split}")
 
-        parquet_file_path = self._check_raw_parquet_file(split)
+        exists, parquet_file_path = self._check_raw_parquet_file(split)
         self.logger.info(f"Reading parquet file: {parquet_file_path}")
         df = pd.read_parquet(parquet_file_path)
         total_records = len(df)
@@ -243,8 +249,8 @@ class DataProcessing:
             tokens = text.lower().split()
             vectors = [w2v_model[word] for word in tokens if word in w2v_model]
             if not vectors:
-                return [np.zeros(vector_size)]
-            return vectors
+                return [np.zeros(vector_size, dtype=np.float32)]
+            return [vec.astype(np.float32) for vec in vectors]
 
         for idx, row in tqdm(df.iterrows(), total=len(df), desc="Embedding rows"):
             query_embs.append(w2v_utils.embedding(row["query"]))
@@ -269,8 +275,8 @@ class DataProcessing:
 
         # Add sequence embeddings to DataFrame
         df["query_emb_seq"] = query_embs_seq
-        df["positive_doc_emb_seq"] = pos_embs
-        df["negative_doc_emb_seq"] = neg_embs
+        df["positive_doc_emb_seq"] = pos_doc_embs_seq
+        df["negative_doc_emb_seq"] = neg_doc_embs_seq
 
         triple_embedding_path = os.path.join(self.MLX_DATASET_OUTPUT_DIR, f"{split}_triples_embeddings.parquet")
         self.logger.info(f"Saving embeddings to {triple_embedding_path}")

@@ -70,7 +70,7 @@ class TwoTowerRNN:
         self.MARGIN = float(os.getenv("MARGIN", 0.15))
         self.TOP_K = int(os.getenv("TOP_K", 10))
 
-        self.TRIPLES_EMBEDDINGS_DATA_PATH = os.path.join(self.MLX_DATASET_OUTPUT_DIR, "train_triples_embeddings.parquet")
+        self.TRIPLES_EMBEDDINGS_DATA_PATH_TRAIN = os.path.join(self.MLX_DATASET_OUTPUT_DIR, "train_triples_embeddings.parquet")
         self.TRIPLES_EMBEDDINGS_DATA_PATH_VALIDATION = os.path.join(self.MLX_DATASET_OUTPUT_DIR,  "validation_triples_embeddings.parquet")
         self.TRIPLES_EMBEDDINGS_DATA_PATH_TEST = os.path.join(self.MLX_DATASET_OUTPUT_DIR,  "test_triples_embeddings.parquet")
     
@@ -85,7 +85,9 @@ class TwoTowerRNN:
         self.logger.info(f"BATCH_SIZE: {self.BATCH_SIZE}")
         self.logger.info(f"LEARNING_RATE: {self.LEARNING_RATE}")
         self.logger.info(f"MARGIN: {self.MARGIN}")
-        self.logger.info(f"TRIPLES_EMBEDDINGS_DATA_PATH: {self.TRIPLES_EMBEDDINGS_DATA_PATH}")
+        self.logger.info(f"TRIPLES_EMBEDDINGS_DATA_PATH_TRAIN: {self.TRIPLES_EMBEDDINGS_DATA_PATH_TRAIN}")
+        self.logger.info(f"TRIPLES_EMBEDDINGS_DATA_PATH_VALIDATION: {self.TRIPLES_EMBEDDINGS_DATA_PATH_VALIDATION}")
+        self.logger.info(f"TRIPLES_EMBEDDINGS_DATA_PATH_TEST: {self.TRIPLES_EMBEDDINGS_DATA_PATH_TEST}")
         self.logger.info(f"WANDB_PROJECT: {self.WANDB_PROJECT}")
         self.logger.info(f"WANDB_RUN_NAME2: {self.WANDB_RUN_NAME2}")
         self.logger.info(f"TWO_TOWER_RNN_MODEL_PATH: {self.TWO_TOWER_RNN_MODEL_PATH}")
@@ -175,8 +177,8 @@ class TwoTowerRNN:
         df_test = pd.read_parquet(self.TRIPLES_EMBEDDINGS_DATA_PATH_TEST)
 
         # Load training data from parquet
-        self.logger.info(f"Loading training data from {self.TRIPLES_EMBEDDINGS_DATA_PATH}")
-        df = pd.read_parquet(self.TRIPLES_EMBEDDINGS_DATA_PATH)
+        self.logger.info(f"Loading training data from {self.TRIPLES_EMBEDDINGS_DATA_PATH_TRAIN}")
+        df = pd.read_parquet(self.TRIPLES_EMBEDDINGS_DATA_PATH_TRAIN)
 
         qry_seq = df["query_emb_seq"].values
         pos_seq = df["positive_doc_emb_seq"].values
