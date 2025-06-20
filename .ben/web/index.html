@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Search</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="title">
+                    <span class="icon">🔍</span>
+                    Document Search
+                </h1>
+                <p class="subtitle">Fast vector-based document retrieval</p>
+            </div>
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-dot" id="statusDot"></span>
+                <span class="status-text" id="statusText">Checking connection...</span>
+            </div>
+        </header>
+
+        <!-- Search Section -->
+        <section class="search-section">
+            <div class="search-container">
+                <div class="search-box">
+                    <input 
+                        type="text" 
+                        id="searchInput" 
+                        placeholder="Enter your search query..."
+                        autocomplete="off"
+                        spellcheck="false"
+                    >
+                    <button id="searchButton" class="search-btn">
+                        <span class="search-icon">🔍</span>
+                        Search
+                    </button>
+                </div>
+                
+                <div class="search-options">
+                    <div class="option-group">
+                        <label for="resultsCount">Results:</label>
+                        <select id="resultsCount">
+                            <option value="5">5</option>
+                            <option value="10" selected>10</option>
+                            <option value="20">20</option>
+                            <option value="50">50</option>
+                        </select>
+                    </div>
+                    
+                    <div class="option-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="includeText" checked>
+                            <span class="checkmark"></span>
+                            Include full text
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Loading Spinner -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Searching documents...</p>
+        </div>
+
+        <!-- Results Section -->
+        <section class="results-section" id="resultsSection">
+            <div class="results-header" id="resultsHeader">
+                <!-- Results summary will be inserted here -->
+            </div>
+            
+            <div class="results-container" id="resultsContainer">
+                <!-- Search results will be inserted here -->
+            </div>
+        </section>
+
+        <!-- System Stats -->
+        <section class="stats-section" id="statsSection">
+            <div class="stats-header">
+                <h3>System Statistics</h3>
+                <button id="refreshStats" class="refresh-btn">↻ Refresh</button>
+            </div>
+            <div class="stats-grid" id="statsGrid">
+                <!-- Stats will be loaded here -->
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-content">
+                <p>Powered by FastAPI, Redis, and SQLite</p>
+                <div class="footer-links">
+                    <a href="javascript:void(0)" onclick="window.open(getApiBaseUrl() + '/docs')" target="_blank">API Docs</a>
+                    <a href="javascript:void(0)" onclick="window.open(getApiBaseUrl() + '/redoc')" target="_blank">ReDoc</a>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Error Modal -->
+    <div class="modal" id="errorModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Error</h3>
+                <button class="modal-close" id="closeModal">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Error message will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html> 
