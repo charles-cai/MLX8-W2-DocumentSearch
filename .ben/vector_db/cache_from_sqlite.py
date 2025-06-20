@@ -42,7 +42,8 @@ def cache_from_sqlite_to_redis(redis_config: Dict,
                               sqlite_db_path: str = "./documents.db",
                               limit: int = None,
                               minimal: bool = True,
-                              device: str = "cpu"):
+                              device: str = "cpu",
+                              force: bool = False):
     """
     Cache documents from SQLite to Redis efficiently.
     
@@ -53,6 +54,7 @@ def cache_from_sqlite_to_redis(redis_config: Dict,
         limit: Maximum number of documents to cache
         minimal: Whether to store only embeddings (no text) in Redis
         device: Device for model inference
+        force: If True, force re-cache all documents (skip cache checking)
     """
     logger.info("🚀 Starting SQLite to Redis caching...")
     logger.info("=" * 60)
@@ -82,80 +84,95 @@ def cache_from_sqlite_to_redis(redis_config: Dict,
     logger.info(f"📊 Found {len(sqlite_docs)} documents in SQLite")
     
     # Filter out already cached documents using batch operations with freshness check
-    logger.info("🔍 Checking which documents are already cached and up-to-date...")
-    uncached_docs = []
-    cached_count = 0
-    stale_count = 0
-    
-    # Batch check for better performance
-    batch_size = 1000
-    for i in tqdm(range(0, len(sqlite_docs), batch_size), desc="Checking cache"):
-        batch = sqlite_docs[i:i + batch_size]
+    if force:
+        logger.info("🔄 Force mode enabled - will re-cache all documents...")
+        uncached_docs = []
+        for doc_id, doc_text, source, metadata_str in sqlite_docs:
+            try:
+                metadata = json.loads(metadata_str) if metadata_str else {}
+            except:
+                metadata = {}
+            uncached_docs.append((doc_id, doc_text, source, metadata))
+        cached_count = 0
+        stale_count = len(sqlite_docs)
+    else:
+        logger.info("🔍 Checking which documents are already cached and up-to-date...")
+        uncached_docs = []
+        cached_count = 0
+        stale_count = 0
         
-        # Prepare batch of Redis keys
-        redis_keys = [f"doc:{vector_store.index_name}:{doc[0]}" for doc in batch]
-        
-        # Batch check for existence AND get timestamps
-        pipe = vector_store.redis_client.pipeline()
-        for key in redis_keys:
-            pipe.hget(key, "timestamp")  # Get cached timestamp (None if doesn't exist)
-        cached_timestamps = pipe.execute()
-        
-        # Process results
-        for j, (doc_id, doc_text, source, metadata_str) in enumerate(batch):
-            cached_timestamp = cached_timestamps[j]
+        # Batch check for better performance
+        batch_size = 1000
+        for i in tqdm(range(0, len(sqlite_docs), batch_size), desc="Checking cache"):
+            batch = sqlite_docs[i:i + batch_size]
             
-            if cached_timestamp is None:
-                # Document not cached at all
-                try:
-                    metadata = json.loads(metadata_str) if metadata_str else {}
-                except:
-                    metadata = {}
-                uncached_docs.append((doc_id, doc_text, source, metadata))
-            else:
-                # Document exists in cache - check if it's fresh
-                try:
-                    # Get SQLite document timestamp from the current batch
-                    sqlite_created_at = None
-                    for sqlite_doc in sqlite_docs:
-                        if sqlite_doc[0] == doc_id:
-                            # Get full document data to access created_at
-                            doc_data = doc_store.get_document(doc_id)
-                            if doc_data:
-                                sqlite_created_at = doc_data.get('created_at')
-                            break
-                    
-                    if sqlite_created_at:
-                        cached_timestamp_str = cached_timestamp.decode('utf-8') if isinstance(cached_timestamp, bytes) else cached_timestamp
+            # Prepare batch of Redis keys
+            redis_keys = [f"doc:{vector_store.index_name}:{doc[0]}" for doc in batch]
+            
+            # Batch check for existence AND get timestamps
+            pipe = vector_store.redis_client.pipeline()
+            for key in redis_keys:
+                pipe.hget(key, "timestamp")  # Get cached timestamp (None if doesn't exist)
+            cached_timestamps = pipe.execute()
+            
+            # Process results
+            for j, (doc_id, doc_text, source, metadata_str) in enumerate(batch):
+                cached_timestamp = cached_timestamps[j]
+                
+                if cached_timestamp is None:
+                    # Document not cached at all
+                    try:
+                        metadata = json.loads(metadata_str) if metadata_str else {}
+                    except:
+                        metadata = {}
+                    uncached_docs.append((doc_id, doc_text, source, metadata))
+                else:
+                    # Document exists in cache - check if it's fresh
+                    try:
+                        # Get SQLite document timestamp from the current batch
+                        sqlite_created_at = None
+                        for sqlite_doc in sqlite_docs:
+                            if sqlite_doc[0] == doc_id:
+                                # Get full document data to access created_at
+                                doc_data = doc_store.get_document(doc_id)
+                                if doc_data:
+                                    sqlite_created_at = doc_data.get('created_at')
+                                break
                         
-                        # Compare timestamps (SQLite format: ISO datetime string)
-                        sqlite_time = datetime.fromisoformat(sqlite_created_at)
-                        cached_time = datetime.fromisoformat(cached_timestamp_str)
-                        
-                        if sqlite_time > cached_time:
-                            # SQLite document is newer - needs re-caching
-                            try:
-                                metadata = json.loads(metadata_str) if metadata_str else {}
-                            except:
-                                metadata = {}
-                            uncached_docs.append((doc_id, doc_text, source, metadata))
-                            stale_count += 1
+                        if sqlite_created_at:
+                            cached_timestamp_str = cached_timestamp.decode('utf-8') if isinstance(cached_timestamp, bytes) else cached_timestamp
+                            
+                            # Compare timestamps (SQLite format: ISO datetime string)
+                            sqlite_time = datetime.fromisoformat(sqlite_created_at)
+                            cached_time = datetime.fromisoformat(cached_timestamp_str)
+                            
+                            if sqlite_time > cached_time:
+                                # SQLite document is newer - needs re-caching
+                                try:
+                                    metadata = json.loads(metadata_str) if metadata_str else {}
+                                except:
+                                    metadata = {}
+                                uncached_docs.append((doc_id, doc_text, source, metadata))
+                                stale_count += 1
+                            else:
+                                # Cache is up-to-date
+                                cached_count += 1
                         else:
-                            # Cache is up-to-date
+                            # Can't determine SQLite timestamp - assume cache is valid
                             cached_count += 1
-                    else:
-                        # Can't determine SQLite timestamp - assume cache is valid
+                            
+                    except Exception as e:
+                        # Error comparing timestamps - assume cache is valid
+                        logger.debug(f"Failed to compare timestamps for {doc_id}: {e}")
                         cached_count += 1
-                        
-                except Exception as e:
-                    # Error comparing timestamps - assume cache is valid
-                    logger.debug(f"Failed to compare timestamps for {doc_id}: {e}")
-                    cached_count += 1
     
     logger.info(f"📋 Cache status:")
-    logger.info(f"   Up-to-date: {cached_count:,}")
-    logger.info(f"   Stale (needs update): {stale_count:,}")
-    logger.info(f"   Not cached: {len(uncached_docs) - stale_count:,}")
+    if force:
+        logger.info(f"   Force mode: Re-caching all {len(uncached_docs):,} documents")
+    else:
+        logger.info(f"   Up-to-date: {cached_count:,}")
+        logger.info(f"   Stale (needs update): {stale_count:,}")
+        logger.info(f"   Not cached: {len(uncached_docs) - stale_count:,}")
     logger.info(f"   Total to process: {len(uncached_docs):,}")
     
     if not uncached_docs:
@@ -252,6 +269,9 @@ Examples:
   # Cache all documents (minimal mode)
   python cache_from_sqlite.py -c ../checkpoints/model.pt
   
+  # Force re-cache documents (ignore existing cache)
+  python cache_from_sqlite.py -c ../checkpoints/model.pt --force --limit 1000
+  
   # Cache with full document text (not recommended)
   python cache_from_sqlite.py -c ../checkpoints/model.pt --full
         """,
@@ -273,6 +293,8 @@ Examples:
                        help="Device for model inference")
     parser.add_argument("--full", action="store_true",
                        help="Store full document text in Redis (not recommended)")
+    parser.add_argument("--force", action="store_true",
+                       help="Force re-cache all documents (skip cache checking)")
     
     # Parse arguments and show help if required params missing
     if len(sys.argv) == 1:
@@ -312,7 +334,8 @@ Examples:
             sqlite_db_path=args.db,
             limit=args.limit,
             minimal=not args.full,  # Default to minimal unless --full specified
-            device=args.device
+            device=args.device,
+            force=args.force
         )
         
     except Exception as e:
