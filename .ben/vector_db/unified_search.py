@@ -19,9 +19,11 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-# Add paths for imports
-sys.path.append('../training')
-sys.path.append('.')
+# Add paths for imports - make it work from any directory
+import os
+script_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(script_dir, '../training'))
+sys.path.append(script_dir)
 
 from redis_vector_store import RedisVectorStore, load_model_from_checkpoint
 from document_store import DocumentStore

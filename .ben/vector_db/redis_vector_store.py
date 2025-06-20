@@ -278,17 +278,18 @@ class RedisVectorStore:
             try:
                 # Build search query
                 if filter_query:
-                    vector_query = f"({filter_query})=>[KNN {k} @embedding $query_vec AS score]"
+                    vector_query = f"({filter_query})=>[KNN {k} @embedding $query_vec AS vector_score]"
                 else:
-                    vector_query = f"*=>[KNN {k} @embedding $query_vec AS score]"
+                    vector_query = f"*=>[KNN {k} @embedding $query_vec AS vector_score]"
                 
                 # Execute search
                 search_cmd = [
                     "FT.SEARCH", self.index_name,
                     vector_query,
                     "PARAMS", "2", "query_vec", query_embedding.tobytes(),
-                    "SORTBY", "score",
-                    "RETURN", "4", "doc_id", "doc_text", "metadata", "score"
+                    "SORTBY", "vector_score",
+                    "RETURN", "4", "doc_id", "doc_text", "metadata", "vector_score",
+                    "DIALECT", "2"
                 ]
                 
                 result = self.redis_client.execute_command(*search_cmd)
@@ -325,7 +326,7 @@ class RedisVectorStore:
                             except:
                                 pass
                         
-                        similarity = 1.0 - float(doc_data.get('score', 1.0))  # Convert distance to similarity
+                        similarity = 1.0 - float(doc_data.get('vector_score', 1.0))  # Convert distance to similarity
                         
                         results.append(VectorSearchResult(
                             doc_id=doc_data.get('doc_id', ''),

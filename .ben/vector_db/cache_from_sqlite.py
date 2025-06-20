@@ -129,7 +129,6 @@ def cache_from_sqlite_to_redis(redis_config: Dict,
                         cached_timestamp_str = cached_timestamp.decode('utf-8') if isinstance(cached_timestamp, bytes) else cached_timestamp
                         
                         # Compare timestamps (SQLite format: ISO datetime string)
-                        from datetime import datetime
                         sqlite_time = datetime.fromisoformat(sqlite_created_at)
                         cached_time = datetime.fromisoformat(cached_timestamp_str)
                         
