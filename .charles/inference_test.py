@@ -8,6 +8,10 @@ from dotenv import load_dotenv
 from logging_utils import setup_logging
 from word2vec_utils import Word2vecUtils
 from two_tower_tiny import QryTower, DocTower
+from colorama import init, Fore, Back, Style
+
+# Initialize colorama
+init(autoreset=True)
 
 load_dotenv()
 
@@ -44,6 +48,7 @@ class InferenceTest:
         self.w2v_utils = None  # Still needed for preprocessing user queries
         self.doc_index = None
         self.validation_data = None  # For document lookup only
+        self.test_data = None  # Always load test data for random selection
         
         self._load_components()
     
@@ -122,7 +127,15 @@ class InferenceTest:
         
         self.validation_data = pd.read_parquet(self.VALIDATION_TOWER_EMBEDDINGS_PATH)
         
+        # Load test data from parquet file
+        self.logger.info("Loading test data for random selection...")
+        if not os.path.exists(self.TEST_TRIPLES_EMBEDDINGS_PATH):
+            raise FileNotFoundError(f"Test data not found: {self.TEST_TRIPLES_EMBEDDINGS_PATH}")
+        
+        self.test_data = pd.read_parquet(self.TEST_TRIPLES_EMBEDDINGS_PATH)
+        
         self.logger.info(f"Loaded {len(self.validation_data)} validation documents for lookup")
+        self.logger.info(f"Loaded {len(self.test_data)} test samples for random selection")
         self.logger.info(f"Faiss index contains {self.doc_index.ntotal} documents")
         self.logger.success("All components loaded successfully!")
     
@@ -183,62 +196,156 @@ class InferenceTest:
     
     def _get_random_test_query(self):
         """Get a random query from test data"""
-        self.logger.info("Loading test data for random selection...")
-        test_data = pd.read_parquet(self.TEST_TRIPLES_EMBEDDINGS_PATH)
-        
-        # Select a random row
-        random_idx = random.randint(0, len(test_data) - 1)
-        random_row = test_data.iloc[random_idx]
+        # Select a random row from already loaded test data
+        random_idx = random.randint(0, len(self.test_data) - 1)
+        random_row = self.test_data.iloc[random_idx]
         
         return random_row['query'], random_row['query_id'], random_row['positive_doc']
     
+    def _get_score_color(self, score):
+        """Get color based on RAG scoring system"""
+        if score >= 0.8:
+            return Fore.GREEN + Style.BRIGHT  # Very green
+        elif score >= 0.5:
+            return Fore.GREEN  # Less green
+        elif score >= 0.3:
+            return Fore.YELLOW  # Amber
+        else:
+            return Fore.RED  # Red
+    
+    def _get_sky_400_color(self):
+        """Get Tailwind Sky 400 equivalent color"""
+        return "\033[38;2;56;189;248m"  # RGB(56, 189, 248) - Tailwind Sky 400
+    
+    def _get_orange_400_color(self):
+        """Get Tailwind Orange 400 equivalent color"""
+        return "\033[38;2;251;146;60m"  # RGB(251, 146, 60) - Tailwind Orange 400
+    
+    def _get_fuchsia_400_color(self):
+        """Get Tailwind Fuchsia 400 equivalent color"""
+        return "\033[38;2;232;121;249m"  # RGB(232, 121, 249) - Tailwind Fuchsia 400
+    
     def _format_results(self, query_text, query_id, expected_doc, scores, indices):
-        """Format search results for display"""
+        """Format search results for display with colorama colors"""
         print("=" * 80)
         print("INFERENCE TEST RESULTS")
         print("=" * 80)
         print(f"Device: {self.device} ({'GPU' if self.device.type == 'cuda' else 'CPU'})")
-        print(f"Query: {query_text}")
+        
+        # Query in green
+        print(f"{Fore.GREEN}Query: {query_text}")
+        
         if query_id is not None:
-            print(f"Query ID: {query_id}")
+            print(f"{Fore.CYAN}Query ID: {query_id}")
         if expected_doc is not None:
-            print(f"Expected Document: {expected_doc[:200]}...")
+            print(f"{Fore.CYAN}Expected Document: {expected_doc[:150]}...")
+        
         print("\n" + "-" * 80)
         print(f"TOP {len(indices)} RETRIEVED DOCUMENTS:")
         print("-" * 80)
         
+        sky_400 = self._get_sky_400_color()
+        orange_400 = self._get_orange_400_color()
+        fuchsia_400 = self._get_fuchsia_400_color()
+        
         for rank, (score, idx) in enumerate(zip(scores, indices), 1):
+            score_color = self._get_score_color(score)
+            
             if idx < len(self.validation_data):
                 doc = self.validation_data.iloc[idx]
                 doc_text = doc['positive_doc']
                 doc_query_id = doc['query_id']
                 
-                print(f"\nRank {rank} (Score: {score:.4f})")
-                print(f"Document Query ID: {doc_query_id}")
-                print(f"Document: {doc_text[:300]}...")
+                # New format: Rank x [Score: 0.xxxx, Q_ID: xxxxx]: document text
+                print(f"{sky_400}Rank {rank}{Style.RESET_ALL} [{fuchsia_400}Score: {score:.4f}{Style.RESET_ALL}, {orange_400}Q_ID: {doc_query_id}{Style.RESET_ALL}]: {Fore.GREEN}{doc_text[:150]}...{Style.RESET_ALL}")
                 
                 # Check if this is a relevant document (same query_id)
                 if query_id is not None and doc_query_id == query_id:
-                    print("*** RELEVANT MATCH ***")
+                    print(f"{Fore.MAGENTA + Style.BRIGHT}*** RELEVANT MATCH ***{Style.RESET_ALL}")
+                
+                print()  # Add blank line between results
             else:
-                print(f"\nRank {rank} (Score: {score:.4f})")
-                print("Document index out of range")
+                print(f"{sky_400}Rank {rank}{Style.RESET_ALL} [{fuchsia_400}Score: {score:.4f}{Style.RESET_ALL}, {Fore.RED}Q_ID: OUT_OF_RANGE{Style.RESET_ALL}]: {Fore.RED}Document index out of range{Style.RESET_ALL}")
+                print()
         
-        print("\n" + "=" * 80)
+        print("=" * 80)
     
+    def _get_query_by_id(self, query_id):
+        """Get query and documents by query_id from test data"""
+        try:
+            query_id = int(query_id)
+            matching_rows = self.test_data[self.test_data['query_id'] == query_id]
+            
+            if matching_rows.empty:
+                return None, None, []
+            
+            # Get the first matching row for query text
+            first_row = matching_rows.iloc[0]
+            query_text = first_row['query']
+            
+            # Get all positive documents for this query_id
+            positive_docs = matching_rows['positive_doc'].tolist()
+            
+            return query_text, query_id, positive_docs
+            
+        except ValueError:
+            return None, None, []
+    
+    def _format_query_id_results(self, query_text, query_id, positive_docs):
+        """Format query ID lookup results for display"""
+        print("=" * 80)
+        print("QUERY ID LOOKUP RESULTS")
+        print("=" * 80)
+        
+        # Query in green
+        print(f"{Fore.GREEN}Query: {query_text}")
+        print(f"{Fore.CYAN}Query ID: {query_id}")
+        print(f"{Fore.CYAN}Total Documents: {len(positive_docs)}")
+        
+        print("\n" + "-" * 80)
+        print(f"ALL DOCUMENTS FOR QUERY ID {query_id}:")
+        print("-" * 80)
+        
+        for i, doc_text in enumerate(positive_docs, 1):
+            print(f"{Fore.YELLOW}Document {i}:{Style.RESET_ALL} {Fore.GREEN}{doc_text[:150]}...{Style.RESET_ALL}")
+            print()
+        
+        print("=" * 80)
+
     def run_inference(self, query_text=None):
-        """Run inference with provided query or random selection from test data"""
+        """Run inference with provided query, query ID lookup, or random selection from test data"""
         if query_text is None or query_text.strip() == "":
             # Random selection from test data
             self.logger.info("No query provided, selecting random query from test data...")
             query_text, query_id, expected_doc = self._get_random_test_query()
             self.logger.info(f"Selected random query: {query_text[:50]}...")
+        elif query_text.strip().isdigit():
+            # Numeric input - treat as query_id lookup
+            self.logger.info(f"Numeric input detected, looking up query ID: {query_text}")
+            lookup_query, lookup_query_id, positive_docs = self._get_query_by_id(query_text)
+            
+            if lookup_query is None:
+                print(f"{Fore.RED}No documents found for Query ID {query_text}.{Style.RESET_ALL}")
+                return {
+                    'query': None,
+                    'query_id': int(query_text),
+                    'error': 'No documents found for this Query ID'
+                }
+            
+            # Display query ID results and return early
+            self._format_query_id_results(lookup_query, lookup_query_id, positive_docs)
+            return {
+                'query': lookup_query,
+                'query_id': lookup_query_id,
+                'documents': positive_docs,
+                'total_documents': len(positive_docs)
+            }
         else:
-            # User provided query
+            # User provided query text
             self.logger.info(f"Processing user query: {query_text[:50]}...")
             query_id = None
             expected_doc = None
-        
+
         # Embed the query (text -> word2vec -> query tower -> 128-dim)
         embedding_start = torch.cuda.Event(enable_timing=True) if self.device.type == "cuda" else None
         embedding_end = torch.cuda.Event(enable_timing=True) if self.device.type == "cuda" else None
@@ -287,36 +394,29 @@ def main():
         print("Instructions:")
         print("- Press Enter (empty query) to test with a random query from test data")
         print("- Type a query to search for similar documents")
-        print("- Type 'quit' or 'exit' to stop")
+        print("- Type a number to lookup specific Query ID and see all its documents")
+        print("- Press Ctrl-C to exit")
         print("=" * 80)
         
         while True:
             try:
-                query = input("\nEnter your query (or press Enter for random): ").strip()
-                
-                if query.lower() in ['quit', 'exit', 'q']:
-                    print("Goodbye!")
-                    break
+                # Blue colored prompt
+                query = input(f"\n{Fore.BLUE}Enter your query (or press Enter for random, Ctrl-C to exit): {Style.RESET_ALL}").strip()
                 
                 # Run inference
                 results = inference.run_inference(query if query else None)
                 
-                # Ask if user wants to continue
-                continue_prompt = input("\nWould you like to try another query? (y/n): ").strip().lower()
-                if continue_prompt in ['n', 'no']:
-                    break
-                    
             except KeyboardInterrupt:
-                print("\n\nExiting...")
+                print(f"\n\n{Fore.YELLOW}Exiting...{Style.RESET_ALL}")
                 break
             except Exception as e:
                 logger.error(f"Error during inference: {e}")
-                print(f"Error: {e}")
+                print(f"{Fore.RED}Error: {e}{Style.RESET_ALL}")
                 continue
     
     except Exception as e:
         logger.error(f"Failed to initialize inference: {e}")
-        print(f"Initialization error: {e}")
+        print(f"{Fore.RED}Initialization error: {e}{Style.RESET_ALL}")
 
 if __name__ == "__main__":
     main()
