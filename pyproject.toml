@@ -23,7 +23,7 @@ dependencies = [
     "sentence-transformers>=4.1.0",
     "gensim>=4.3.3",
     "redis>=6.2.0",
-    "faiss-cpu>=1.8.0; sys_platform == 'darwin'",
+    "faiss-cpu>=1.8.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "faiss-gpu-cu12>=1.11.0; sys_platform == 'linux'",
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
